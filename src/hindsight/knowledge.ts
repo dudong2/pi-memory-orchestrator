@@ -1,0 +1,104 @@
+import type { HindsightClient, KnowledgeNode, KnowledgePageRequest } from "./client.js";
+import type { ResolvedScope } from "../scope/resolver.js";
+
+export interface KnowledgeApi {
+  knowledgeTree(bankId: string, signal?: AbortSignal): Promise<{ roots: KnowledgeNode[] }>;
+  createKnowledgeFolder(bankId: string, request: { name: string; parent_id?: string }, signal?: AbortSignal): Promise<Record<string, unknown>>;
+  createKnowledgePage(bankId: string, request: KnowledgePageRequest, signal?: AbortSignal): Promise<Record<string, unknown>>;
+}
+
+export interface KnowledgeViewResult {
+  createdFolders: number;
+  createdPages: number;
+}
+
+function nodeId(response: Record<string, unknown>): string {
+  if (typeof response.id === "string") return response.id;
+  const node = response.node;
+  if (node && typeof node === "object" && "id" in node && typeof node.id === "string") return node.id;
+  throw new Error("Hindsight knowledge API response has no node id");
+}
+
+function findChild(nodes: KnowledgeNode[], name: string, kind: "folder" | "page"): KnowledgeNode | undefined {
+  return nodes.find((node) => node.kind === kind && node.name === name);
+}
+
+async function ensureFolder(
+  api: KnowledgeApi,
+  bankId: string,
+  siblings: KnowledgeNode[],
+  name: string,
+  parentId: string | undefined,
+  signal?: AbortSignal,
+): Promise<{ id: string; children: KnowledgeNode[]; created: boolean }> {
+  const existing = findChild(siblings, name, "folder");
+  if (existing) return { id: existing.id, children: existing.children ?? [], created: false };
+  const response = await api.createKnowledgeFolder(bankId, {
+    name,
+    ...(parentId ? { parent_id: parentId } : {}),
+  }, signal);
+  return { id: nodeId(response), children: [], created: true };
+}
+
+async function ensurePage(
+  api: KnowledgeApi,
+  bankId: string,
+  siblings: KnowledgeNode[],
+  request: KnowledgePageRequest,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  if (findChild(siblings, request.name, "page")) return false;
+  await api.createKnowledgePage(bankId, request, signal);
+  return true;
+}
+
+function pageTrigger() {
+  return {
+    mode: "delta" as const,
+    refresh_after_consolidation: true,
+    min_refresh_interval_seconds: 3_600,
+    fact_types: ["observation" as const],
+    tags_match: "all_strict" as const,
+    keep_trace: true,
+  };
+}
+
+export async function ensureKnowledgeViews(
+  api: KnowledgeApi | HindsightClient,
+  bankId: string,
+  scope: ResolvedScope,
+  signal?: AbortSignal,
+): Promise<KnowledgeViewResult> {
+  const tree = await api.knowledgeTree(bankId, signal);
+  let createdFolders = 0;
+  let createdPages = 0;
+
+  const shared = await ensureFolder(api, bankId, tree.roots, "Coding Workspaces", undefined, signal);
+  if (shared.created) createdFolders++;
+  const workspaceName = `${scope.marker.displayName} [${scope.marker.workspaceId}]`;
+  const workspace = await ensureFolder(api, bankId, shared.children, workspaceName, shared.id, signal);
+  if (workspace.created) createdFolders++;
+
+  if (await ensurePage(api, bankId, workspace.children, {
+    name: "Workspace overview",
+    source_query: "Maintain a concise current overview of shared architecture, conventions, decisions, corrections, and cross-repository dependencies for this workspace. Preserve important temporal changes.",
+    parent_id: workspace.id,
+    tags: [scope.workspaceTag],
+    max_tokens: 2_048,
+    trigger: pageTrigger(),
+  }, signal)) createdPages++;
+
+  if (scope.repositoryId && scope.repositoryTag) {
+    const repoName = scope.repositoryId.split("/").slice(-2).join("/");
+    if (await ensurePage(api, bankId, workspace.children, {
+      name: `Repository: ${repoName}`,
+      source_query: "Maintain a concise current repository overview covering architecture, conventions, decisions, pitfalls, corrections, and active initiatives. Explain temporal changes rather than silently replacing history.",
+      parent_id: workspace.id,
+      tags: [scope.repositoryTag],
+      max_tokens: 2_048,
+      trigger: pageTrigger(),
+    }, signal)) createdPages++;
+  }
+
+  return { createdFolders, createdPages };
+}
