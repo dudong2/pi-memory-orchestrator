@@ -9,6 +9,8 @@ export interface WorkspaceMarker {
   version: typeof WORKSPACE_MARKER_VERSION;
   workspaceId: string;
   displayName: string;
+  /** Global markers retain knowledge under scope:global instead of a workspace/repository tag. */
+  scope?: "workspace" | "global";
   repositories: string[];
   createdAt: string;
   updatedAt: string;
@@ -34,6 +36,9 @@ export function parseWorkspaceMarker(input: unknown): WorkspaceMarker {
     throw new Error("workspaceId must be a ws_-prefixed UUID");
   }
   if (typeof raw.displayName !== "string" || !raw.displayName.trim()) throw new Error("displayName is required");
+  if (raw.scope !== undefined && raw.scope !== "workspace" && raw.scope !== "global") {
+    throw new Error("scope must be workspace or global");
+  }
   if (!Array.isArray(raw.repositories) || raw.repositories.some((item) => typeof item !== "string" || !item.trim())) {
     throw new Error("repositories must be an array of non-empty strings");
   }
@@ -43,6 +48,7 @@ export function parseWorkspaceMarker(input: unknown): WorkspaceMarker {
     version: WORKSPACE_MARKER_VERSION,
     workspaceId: raw.workspaceId,
     displayName: raw.displayName.trim(),
+    ...(raw.scope ? { scope: raw.scope } : {}),
     repositories: [...new Set(raw.repositories.map((item) => item.trim()))].sort((a, b) => a.localeCompare(b)),
     createdAt: raw.createdAt,
     updatedAt: raw.updatedAt,

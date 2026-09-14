@@ -4,6 +4,7 @@ import { DEFAULT_CONFIG } from "../src/config.js";
 import type { HindsightClient, RecallRequest } from "../src/hindsight/client.js";
 import type { RetainOutbox } from "../src/hindsight/outbox.js";
 import { ScopedHindsightProvider } from "../src/hindsight/provider.js";
+import { GLOBAL_SCOPE_TAG } from "../src/scope/query.js";
 import type { ResolvedScope } from "../src/scope/resolver.js";
 
 const scope: ResolvedScope = {
@@ -36,9 +37,31 @@ test("provider sends a strict compound scope filter to native recall", async () 
   assert.equal(outcome.error, undefined);
   assert.equal(outcome.memories.length, 1);
   assert.deepEqual(request?.tag_groups, [{ or: [
+    { tags: [GLOBAL_SCOPE_TAG], match: "all_strict" },
     { tags: [scope.workspaceTag], match: "all_strict" },
     { tags: [scope.repositoryTag], match: "all_strict" },
   ] }]);
+});
+
+test("provider retains turns from a global marker under the global tag", async () => {
+  let item: { tags?: string[]; observation_scopes?: string[][] } | undefined;
+  const outbox = {
+    enqueue: async (job: { item: typeof item }) => { item = job.item; },
+  } as unknown as RetainOutbox;
+  const provider = new ScopedHindsightProvider(DEFAULT_CONFIG, {} as HindsightClient, outbox);
+  await provider.enqueueTurn({
+    ...scope,
+    marker: { ...scope.marker, scope: "global", displayName: "scratchpad", repositories: [] },
+    repositoryId: undefined,
+    repositoryTag: undefined,
+  }, {
+    sessionId: "session",
+    turnId: "turn",
+    harness: "test",
+    timestamp: "2026-09-14T00:00:00.000Z",
+  }, "question", "answer");
+  assert.deepEqual(item?.tags, [GLOBAL_SCOPE_TAG]);
+  assert.deepEqual(item?.observation_scopes, [[GLOBAL_SCOPE_TAG]]);
 });
 
 test("provider recall fails open", async () => {

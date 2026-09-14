@@ -1,5 +1,6 @@
 import type { HindsightClient, KnowledgeNode, KnowledgePageRequest } from "./client.js";
 import type { ResolvedScope } from "../scope/resolver.js";
+import { GLOBAL_SCOPE_TAG } from "../scope/query.js";
 
 export interface KnowledgeApi {
   knowledgeTree(bankId: string, signal?: AbortSignal): Promise<{ roots: KnowledgeNode[] }>;
@@ -75,6 +76,19 @@ export async function ensureKnowledgeViews(
 
   const shared = await ensureFolder(api, bankId, tree.roots, "Coding Workspaces", undefined, signal);
   if (shared.created) createdFolders++;
+
+  if (scope.marker.scope === "global") {
+    if (await ensurePage(api, bankId, shared.children, {
+      name: "Global knowledge",
+      source_query: "Maintain a concise current overview of reusable general knowledge, conventions, decisions, corrections, and durable lessons shared across every coding workspace.",
+      parent_id: shared.id,
+      tags: [GLOBAL_SCOPE_TAG],
+      max_tokens: 2_048,
+      trigger: pageTrigger(),
+    }, signal)) createdPages++;
+    return { createdFolders, createdPages };
+  }
+
   const workspaceName = `${scope.marker.displayName} [${scope.marker.workspaceId}]`;
   const workspace = await ensureFolder(api, bankId, shared.children, workspaceName, shared.id, signal);
   if (workspace.created) createdFolders++;

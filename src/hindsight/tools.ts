@@ -55,6 +55,7 @@ export function registerLongMemoryTool(
     promptGuidelines: [
       "Search long_memory when the request depends on prior work not present in bounded memory.",
       "Use workspace scope only for facts shared by every repository in the logical workspace.",
+      "A marker with scope=global stores current/workspace retention under scope:global, which every workspace can recall.",
       "Use correct or forget only with a memory_id returned by search.",
     ],
     parameters: LongMemorySchema,

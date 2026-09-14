@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildScopeQueryPlan, hasWorkspaceWideIntent } from "../src/scope/query.js";
+import { buildScopeQueryPlan, GLOBAL_SCOPE_TAG, hasWorkspaceWideIntent } from "../src/scope/query.js";
 import type { ResolvedScope } from "../src/scope/resolver.js";
 
 const scope: ResolvedScope = {
@@ -24,11 +24,12 @@ const scope: ResolvedScope = {
   git: null,
 };
 
-test("default plan includes workspace and current repo but no sibling", () => {
+test("default plan includes global, workspace, and current repo but no sibling", () => {
   const plan = buildScopeQueryPlan(scope, "Fix the login screen");
-  assert.deepEqual(plan.tags, [scope.workspaceTag, scope.repositoryTag]);
+  assert.deepEqual(plan.tags, [GLOBAL_SCOPE_TAG, scope.workspaceTag, scope.repositoryTag]);
   assert.deepEqual(plan.expandedRepositories, []);
   assert.deepEqual(plan.tagGroups, [{ or: [
+    { tags: [GLOBAL_SCOPE_TAG], match: "all_strict" },
     { tags: [scope.workspaceTag], match: "all_strict" },
     { tags: [scope.repositoryTag], match: "all_strict" },
   ] }]);
@@ -45,16 +46,30 @@ test("workspace-wide intent expands all child repositories", () => {
   assert.equal(hasWorkspaceWideIntent("전체 저장소 구조를 비교해줘"), true);
   const plan = buildScopeQueryPlan(scope, "Compare all repositories");
   assert.equal(plan.workspaceWide, true);
-  assert.equal(plan.tags.length, 4);
+  assert.equal(plan.tags.length, 5);
   assert.deepEqual(plan.expandedRepositories, [
     "github.com/dudong2/backend",
     "github.com/dudong2/infrastructure",
   ]);
 });
 
-test("workspace mode excludes every repository", () => {
+test("workspace mode excludes every repository but keeps global knowledge", () => {
   const plan = buildScopeQueryPlan(scope, "shared conventions", { mode: "workspace" });
-  assert.deepEqual(plan.tags, [scope.workspaceTag]);
+  assert.deepEqual(plan.tags, [GLOBAL_SCOPE_TAG, scope.workspaceTag]);
+});
+
+test("a global marker searches only the shared global scope", () => {
+  const globalScope: ResolvedScope = {
+    ...scope,
+    marker: { ...scope.marker, scope: "global", displayName: "scratchpad", repositories: [] },
+    repositoryId: undefined,
+    repositoryTag: undefined,
+  };
+  const plan = buildScopeQueryPlan(globalScope, "general knowledge");
+  assert.deepEqual(plan.tags, [GLOBAL_SCOPE_TAG]);
+  assert.deepEqual(plan.tagGroups, [{ or: [
+    { tags: [GLOBAL_SCOPE_TAG], match: "all_strict" },
+  ] }]);
 });
 
 test("explicit repository mode ignores unknown repository IDs", () => {

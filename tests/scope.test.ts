@@ -79,6 +79,26 @@ test("Git scope uses canonical remote and excludes the local marker", async () =
   assert.match(exclude, /^\/\.pi-memory-scope\.json$/m);
 });
 
+test("a global marker is parsed and inherited by nested folders", async () => {
+  const root = await tempRoot("memory-scope-global-");
+  const markerPath = join(root, ".pi-memory-scope.json");
+  await writeFile(markerPath, JSON.stringify({
+    version: 1,
+    workspaceId: "ws_11111111-1111-4111-8111-111111111111",
+    displayName: "scratchpad",
+    scope: "global",
+    repositories: [],
+    createdAt: "2026-09-14T00:00:00.000Z",
+    updatedAt: "2026-09-14T00:00:00.000Z",
+  }));
+  const child = join(root, "nested");
+  await mkdir(child);
+
+  const scope = await resolveScope(child, { dataDir: join(root, "state") });
+  assert.equal(await realpath(scope.markerPath), await realpath(markerPath));
+  assert.equal(scope.marker.scope, "global");
+});
+
 test("child repositories inherit their nearest parent marker", async () => {
   const root = await tempRoot("memory-scope-parent-");
   const dataDir = join(root, "state");

@@ -13,17 +13,19 @@ The active shared bank is `coding-agent::dudong2`. Former `user-knowledge` and p
 
 ## Scope
 
-The nearest local-only `.pi-memory-scope.json` file gives a logical workspace a stable UUID. Child Git repositories inherit it; canonical Git remotes identify repository scopes. The marker contains identity metadata only, never memory or secrets.
+The nearest local-only `.pi-memory-scope.json` file gives a logical workspace a stable UUID. Child Git repositories inherit it; canonical Git remotes identify repository scopes. The marker contains identity metadata only, never memory or secrets. A marker may set `"scope": "global"`; turns retained below that marker use the reserved `scope:global` tag and are visible from every resolved workspace.
 
 `$HOME` and the filesystem root are hard scope boundaries: their markers are neither discovered nor created. A session launched exactly at `$HOME` keeps bounded `pi-hermes-memory` available but disables project-scoped Hindsight recall and retention. When no allowed ancestor marker exists, a Git session creates one at the repository root and a non-Git session creates one at its starting directory.
 
 Normal recall sends one native Hindsight compound filter for:
 
 ```text
-current workspace OR current repository
+global OR current workspace OR current repository
 ```
 
-A query that explicitly names a sibling repository or asks for cross-repository/workspace-wide context expands the filter to the selected child repositories.
+A global marker searches only `scope:global`, so it is suitable for a dedicated general-knowledge scratchpad. Ordinary markers omit `scope` (or set it to `"workspace"`).
+
+A query that explicitly names a sibling repository or asks for cross-repository/workspace-wide context expands the filter to the selected child repositories. Global knowledge remains included in every query mode.
 
 ## Lifecycle
 

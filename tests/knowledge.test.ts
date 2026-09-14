@@ -3,6 +3,7 @@ import test from "node:test";
 import { ensureKnowledgeViews, type KnowledgeApi } from "../src/hindsight/knowledge.js";
 import type { KnowledgeNode, KnowledgePageRequest } from "../src/hindsight/client.js";
 import type { ResolvedScope } from "../src/scope/resolver.js";
+import { GLOBAL_SCOPE_TAG } from "../src/scope/query.js";
 
 const scope: ResolvedScope = {
   workspaceRoot: "/tmp/product",
@@ -61,4 +62,17 @@ test("knowledge views are idempotent and strictly scope filtered", async () => {
     assert.deepEqual(page.trigger?.fact_types, ["observation"]);
     assert.equal(page.trigger?.mode, "delta");
   }
+});
+
+test("a global marker creates one shared knowledge page", async () => {
+  const api = new FakeKnowledgeApi();
+  const globalScope: ResolvedScope = {
+    ...scope,
+    marker: { ...scope.marker, scope: "global", displayName: "scratchpad", repositories: [] },
+    repositoryId: undefined,
+    repositoryTag: undefined,
+  };
+  assert.deepEqual(await ensureKnowledgeViews(api, "bank", globalScope), { createdFolders: 1, createdPages: 1 });
+  assert.deepEqual(await ensureKnowledgeViews(api, "bank", globalScope), { createdFolders: 0, createdPages: 0 });
+  assert.deepEqual(api.pages.map((page) => page.tags), [[GLOBAL_SCOPE_TAG]]);
 });

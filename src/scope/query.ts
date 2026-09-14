@@ -1,6 +1,8 @@
 import type { TagFilterGroup, TagFilterLeaf } from "../hindsight/client.js";
 import type { ResolvedScope } from "./resolver.js";
 
+export const GLOBAL_SCOPE_TAG = "scope:global";
+
 export type ScopeQueryMode = "auto" | "current" | "workspace" | "all" | "repositories";
 
 export interface ScopeQueryOptions {
@@ -53,9 +55,10 @@ export function buildScopeQueryPlan(
   options: ScopeQueryOptions = {},
 ): ScopeQueryPlan {
   const mode = options.mode ?? "auto";
-  const knownRepositories = scope.marker.repositories;
+  const globalMarker = scope.marker.scope === "global";
+  const knownRepositories = globalMarker ? [] : scope.marker.repositories;
   const requested = new Set<string>();
-  const workspaceWide = mode === "all" || (mode === "auto" && hasWorkspaceWideIntent(query));
+  const workspaceWide = !globalMarker && (mode === "all" || (mode === "auto" && hasWorkspaceWideIntent(query)));
 
   if (mode === "repositories") {
     const known = new Set(knownRepositories);
@@ -71,10 +74,14 @@ export function buildScopeQueryPlan(
     }
   }
 
-  if (mode !== "workspace" && scope.repositoryId) requested.add(scope.repositoryId);
-  const tags = [scope.workspaceTag, ...[...requested]
-    .sort((a, b) => a.localeCompare(b))
-    .map((id) => `scope:repo:${id}`)];
+  if (!globalMarker && mode !== "workspace" && scope.repositoryId) requested.add(scope.repositoryId);
+  const tags = [
+    GLOBAL_SCOPE_TAG,
+    ...(globalMarker ? [] : [scope.workspaceTag]),
+    ...[...requested]
+      .sort((a, b) => a.localeCompare(b))
+      .map((id) => `scope:repo:${id}`),
+  ];
   const leaves = tags.map(leaf);
 
   return {

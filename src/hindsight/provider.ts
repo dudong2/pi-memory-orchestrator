@@ -1,5 +1,5 @@
 import type { OrchestratorConfig } from "../config.js";
-import { buildScopeQueryPlan, type ScopeQueryOptions, type ScopeQueryPlan } from "../scope/query.js";
+import { buildScopeQueryPlan, GLOBAL_SCOPE_TAG, type ScopeQueryOptions, type ScopeQueryPlan } from "../scope/query.js";
 import type { ResolvedScope } from "../scope/resolver.js";
 import { HindsightClient, type RecallMemory, type UpdateMemoryRequest } from "./client.js";
 import { ensureKnowledgeViews, type KnowledgeViewResult } from "./knowledge.js";
@@ -16,6 +16,15 @@ export interface TurnIdentity {
   turnId: string;
   harness: "pi" | "omp" | "test";
   timestamp: string;
+}
+
+function currentScopeTag(scope: ResolvedScope): string {
+  if (scope.marker.scope === "global") return GLOBAL_SCOPE_TAG;
+  return scope.repositoryTag ?? scope.workspaceTag;
+}
+
+function workspaceScopeTag(scope: ResolvedScope): string {
+  return scope.marker.scope === "global" ? GLOBAL_SCOPE_TAG : scope.workspaceTag;
 }
 
 export class ScopedHindsightProvider {
@@ -64,7 +73,7 @@ export class ScopedHindsightProvider {
     user: string,
     assistant: string,
   ): Promise<void> {
-    const scopeTag = scope.repositoryTag ?? scope.workspaceTag;
+    const scopeTag = currentScopeTag(scope);
     await this.#outbox.enqueue({
       identity: `${identity.harness}:${identity.sessionId}:${identity.turnId}`,
       bankId: this.bankId(),
@@ -96,7 +105,7 @@ export class ScopedHindsightProvider {
     scope: ResolvedScope,
     input: { identity: string; content: string; target: "current" | "workspace"; timestamp?: string },
   ): Promise<void> {
-    const scopeTag = input.target === "workspace" ? scope.workspaceTag : scope.repositoryTag ?? scope.workspaceTag;
+    const scopeTag = input.target === "workspace" ? workspaceScopeTag(scope) : currentScopeTag(scope);
     const timestamp = input.timestamp ?? new Date().toISOString();
     await this.#outbox.enqueue({
       identity: input.identity,
