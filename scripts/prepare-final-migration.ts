@@ -2,13 +2,14 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { transformArchive } from "../src/migration/transform.js";
 import { verifyTransformedArchive } from "../src/migration/verify.js";
+import { parseJson } from "../src/json.js";
 
 const backup = process.argv[2];
 if (!backup) throw new Error("usage: prepare-final-migration <backup-dir>");
 const migrationDir = join(backup, "migrations");
-const inventory = JSON.parse(await readFile(join(migrationDir, "inventory.json"), "utf8")) as {
+const inventory = parseJson<{
   documents: Array<{ bankId: string; documentId: string; action: string; scopeTag?: string }>;
-};
+}>(await readFile(join(migrationDir, "inventory.json"), "utf8"), "migration inventory");
 const archives: Record<string, string> = {
   "coding-agent::scratch": "coding-agent__scratch.zip",
   "coding-agent::memory": "coding-agent__memory.zip",

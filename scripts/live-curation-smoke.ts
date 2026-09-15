@@ -2,11 +2,12 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { HindsightClient } from "../src/hindsight/client.js";
 import { deterministicOperationId } from "../src/hindsight/outbox.js";
+import { parseJson } from "../src/json.js";
 
-const connection = JSON.parse(readFileSync(`${process.env.HOME}/.hindsight/coding-agent.json`, "utf8")) as {
-  apiUrl: string;
-  apiToken: string;
-};
+const connection = parseJson<{ apiUrl: string; apiToken: string }>(
+  readFileSync(`${process.env.HOME}/.hindsight/coding-agent.json`, "utf8"),
+  "Hindsight connection",
+);
 const client = new HindsightClient({ apiUrl: connection.apiUrl, apiToken: connection.apiToken, requestTimeoutMs: 30_000 });
 const bankId = "coding-agent::dudong2::shadow";
 const token = `curationprobe-${randomUUID()}`;

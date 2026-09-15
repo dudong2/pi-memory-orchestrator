@@ -1,6 +1,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { loadConfig, resolveHindsightConnection } from "../src/config.js";
+import { parseJson } from "../src/json.js";
 
 const backup = process.argv[2];
 const consolidationOperationId = process.argv[3];
@@ -10,10 +11,10 @@ const connection = resolveHindsightConnection(config);
 const bankId = "coding-agent::dudong2";
 const bank = encodeURIComponent(bankId);
 const headers = { Authorization: `Bearer ${connection.apiToken}` };
-const inventory = JSON.parse(await readFile(join(backup, "migrations", "inventory.json"), "utf8")) as {
+const inventory = parseJson<{
   summary: Record<string, unknown>;
   documents: Array<{ bankId: string; documentId: string; action: string; scopeTag?: string; factCount: number }>;
-};
+}>(await readFile(join(backup, "migrations", "inventory.json"), "utf8"), "migration inventory");
 const expected = inventory.documents.filter((item) => item.action === "import");
 const documents = await get(`/v1/default/banks/${bank}/documents?limit=1000`) as {
   items: Array<{ id: string; memory_unit_count?: number }>;

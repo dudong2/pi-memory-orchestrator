@@ -6,6 +6,7 @@ import { loadConfig, resolveHindsightConnection } from "../src/config.js";
 import { HindsightClient } from "../src/hindsight/client.js";
 import { RetainOutbox } from "../src/hindsight/outbox.js";
 import { ScopedHindsightProvider } from "../src/hindsight/provider.js";
+import { parseJson } from "../src/json.js";
 import type { ResolvedScope } from "../src/scope/resolver.js";
 
 const reportPath = process.argv[2];
@@ -41,6 +42,24 @@ const scope: ResolvedScope = {
   repositoryId: currentRepo,
   repositoryTag: `scope:repo:${currentRepo}`,
   git: null,
+  scopeTag: `scope:repo:${currentRepo}`,
+  kind: "repository",
+  ancestors: [{
+    root: "/acceptance",
+    markerPath: "/acceptance/.pi-memory-scope.json",
+    marker: {
+      version: 1,
+      workspaceId,
+      displayName: "acceptance-workspace",
+      repositories: [],
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-03-01T00:00:00.000Z",
+    },
+    kind: "workspace",
+    tag: `scope:workspace:${workspaceId}`,
+  }],
+  knownRepositoryIds: [currentRepo, "github.com/dudong2/scope-sibling"],
+  workspaceRepositoryIds: [currentRepo, "github.com/dudong2/scope-sibling"],
 };
 
 const timestamp = "2026-01-05T12:00:00.000Z";
@@ -80,11 +99,11 @@ for (let run = 1; run <= 2; run++) {
 }
 if (repaired.some((item) => !item.ok)) throw new Error(`repair queries failed: ${JSON.stringify(repaired)}`);
 
-const report = JSON.parse(await readFile(reportPath, "utf8")) as {
+const report = parseJson<{
   results: Array<Record<string, unknown>>;
   failures: Array<Record<string, unknown>>;
   [key: string]: unknown;
-};
+}>(await readFile(reportPath, "utf8"), "shadow acceptance report");
 const initialFailures = report.failures;
 for (const repair of repaired) {
   const index = report.results.findIndex((item) => item.name === repair.name && item.run === repair.run);

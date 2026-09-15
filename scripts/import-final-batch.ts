@@ -2,13 +2,14 @@ import { basename, join } from "node:path";
 import { readFile, writeFile } from "node:fs/promises";
 import { loadConfig, resolveHindsightConnection } from "../src/config.js";
 import { HindsightClient } from "../src/hindsight/client.js";
+import { parseJson } from "../src/json.js";
 
 const backup = process.argv[2];
 if (!backup) throw new Error("usage: import-final-batch <backup-dir>");
-const manifest = JSON.parse(await readFile(join(backup, "migrations", "final-import-batch.json"), "utf8")) as {
+const manifest = parseJson<{
   targetBank: string;
   results: Array<{ outputArchive: string; bankId: string; scopeTag: string }>;
-};
+}>(await readFile(join(backup, "migrations", "final-import-batch.json"), "utf8"), "final import batch");
 const config = loadConfig();
 const client = new HindsightClient({ ...resolveHindsightConnection(config), requestTimeoutMs: 180_000 });
 const imports = [];

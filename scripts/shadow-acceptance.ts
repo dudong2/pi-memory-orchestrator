@@ -46,6 +46,24 @@ const scope: ResolvedScope = {
   repositoryId: currentRepo,
   repositoryTag: `scope:repo:${currentRepo}`,
   git: null,
+  scopeTag: `scope:repo:${currentRepo}`,
+  kind: "repository",
+  ancestors: [{
+    root: "/acceptance",
+    markerPath: "/acceptance/.pi-memory-scope.json",
+    marker: {
+      version: 1,
+      workspaceId,
+      displayName: "acceptance-workspace",
+      repositories: [],
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-03-01T00:00:00.000Z",
+    },
+    kind: "workspace",
+    tag: `scope:workspace:${workspaceId}`,
+  }],
+  knownRepositoryIds: [currentRepo, siblingRepo],
+  workspaceRepositoryIds: [currentRepo, siblingRepo],
 };
 
 const turns: Array<{ sessionId: string; turnId: string; timestamp: string; user: string; assistant: string; scope: ResolvedScope }> = [];
@@ -68,7 +86,14 @@ for (let chain = 1; chain <= 10; chain++) {
 }
 for (let index = 1; index <= 10; index++) {
   const id = String(index).padStart(2, "0");
-  const workspaceOnly: ResolvedScope = { ...scope, repositoryId: undefined, repositoryTag: undefined };
+  const workspaceOnly: ResolvedScope = {
+    ...scope,
+    repositoryId: undefined,
+    repositoryTag: undefined,
+    scopeTag: scope.workspaceTag,
+    kind: "workspace",
+    ancestors: [],
+  };
   turns.push({
     sessionId: `acceptance-workspace-${id}`,
     turnId: `workspace-${id}`,
@@ -95,6 +120,7 @@ for (let index = 1; index <= 5; index++) {
     ...scope,
     repositoryId: siblingRepo,
     repositoryTag: `scope:repo:${siblingRepo}`,
+    scopeTag: `scope:repo:${siblingRepo}`,
   };
   turns.push({
     sessionId: `acceptance-sibling-${id}`,

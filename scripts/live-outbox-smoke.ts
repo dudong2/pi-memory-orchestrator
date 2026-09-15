@@ -4,11 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { HindsightClient } from "../src/hindsight/client.js";
 import { RetainOutbox } from "../src/hindsight/outbox.js";
+import { parseJson } from "../src/json.js";
 
-const connection = JSON.parse(readFileSync(`${process.env.HOME}/.hindsight/coding-agent.json`, "utf8")) as {
-  apiUrl: string;
-  apiToken: string;
-};
+const connection = parseJson<{ apiUrl: string; apiToken: string }>(
+  readFileSync(`${process.env.HOME}/.hindsight/coding-agent.json`, "utf8"),
+  "Hindsight connection",
+);
 const rootDir = await mkdtemp(join(tmpdir(), "memory-outbox-live-"));
 const client = new HindsightClient({
   apiUrl: connection.apiUrl,

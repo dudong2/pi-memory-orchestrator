@@ -1,24 +1,41 @@
 import { existsSync, readFileSync } from "node:fs";
 import { readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { parseJson } from "../src/json.js";
 
 const backup = process.argv[2];
 if (!backup) throw new Error("usage: write-cutover-report <backup-dir>");
-const acceptance = JSON.parse(readFileSync(join(backup, "acceptance", "shadow-acceptance.json"), "utf8"));
-const migration = JSON.parse(readFileSync(join(backup, "migrations", "final-import-result.json"), "utf8"));
-const config = JSON.parse(readFileSync(`${process.env.HOME}/.config/pi-memory-orchestrator/config.json`, "utf8"));
-const piSettings = JSON.parse(readFileSync(`${process.env.HOME}/.pi/agent/settings.json`, "utf8"));
+const acceptance = parseJson<any>(
+  readFileSync(join(backup, "acceptance", "shadow-acceptance.json"), "utf8"),
+  "shadow acceptance report",
+);
+const migration = parseJson<any>(
+  readFileSync(join(backup, "migrations", "final-import-result.json"), "utf8"),
+  "final import result",
+);
+const config = parseJson<any>(
+  readFileSync(`${process.env.HOME}/.config/pi-memory-orchestrator/config.json`, "utf8"),
+  "memory orchestrator config",
+);
+const piSettings = parseJson<any>(
+  readFileSync(`${process.env.HOME}/.pi/agent/settings.json`, "utf8"),
+  "Pi settings",
+);
 const ompConfig = readFileSync(`${process.env.HOME}/.omp/agent/config.yml`, "utf8");
-const pluginLock = JSON.parse(
+const pluginLock = parseJson<{ plugins?: Record<string, { enabled?: boolean }> }>(
   readFileSync(`${process.env.HOME}/.omp/plugins/omp-plugins.lock.json`, "utf8"),
-) as { plugins?: Record<string, { enabled?: boolean }> };
+  "OMP plugin lock",
+);
 const plugin = (name: string) => pluginLock.plugins?.[name];
 const outboxRoot = join(config.dataDir, "outbox");
 const outbox = Object.fromEntries(await Promise.all(["pending", "processing", "failed"].map(async (name) => [
   name,
   existsSync(join(outboxRoot, name)) ? (await readdir(join(outboxRoot, name))).filter((file) => file.endsWith(".json")).length : 0,
 ])));
-const connection = JSON.parse(readFileSync(`${process.env.HOME}/.hindsight/coding-agent.json`, "utf8"));
+const connection = parseJson<{ apiUrl: string; apiToken: string }>(
+  readFileSync(`${process.env.HOME}/.hindsight/coding-agent.json`, "utf8"),
+  "Hindsight connection",
+);
 const bank = encodeURIComponent(config.bankId);
 const headers = { Authorization: `Bearer ${connection.apiToken}` };
 const health = await get("/health");

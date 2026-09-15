@@ -5,6 +5,7 @@ import { loadConfig, resolveHindsightConnection } from "../src/config.js";
 import { HindsightClient } from "../src/hindsight/client.js";
 import { RetainOutbox } from "../src/hindsight/outbox.js";
 import { ScopedHindsightProvider } from "../src/hindsight/provider.js";
+import { parseJson } from "../src/json.js";
 import type { ResolvedScope } from "../src/scope/resolver.js";
 
 const backup = process.argv[2];
@@ -18,7 +19,10 @@ const config = {
 };
 const client = new HindsightClient({ ...resolveHindsightConnection(config), requestTimeoutMs: 30_000 });
 const provider = new ScopedHindsightProvider(config, client, new RetainOutbox({ rootDir: join(config.dataDir, "final-smoke-outbox") }));
-const scopes = JSON.parse(await readFile(join(backup, "migrations", "scopes.json"), "utf8")) as { resolved: Record<string, ResolvedScope> };
+const scopes = parseJson<{ resolved: Record<string, ResolvedScope> }>(
+  await readFile(join(backup, "migrations", "scopes.json"), "utf8"),
+  "migration scopes",
+);
 const cases = [
   { name: "LuckyCat no-fill", scope: scopes.resolved.luckyCat!, query: "What is the verified LuckyCat no-fill scope rule?", expected: ["no-fill"] },
   { name: "LuckyCat walking", scope: scopes.resolved.luckyCat!, query: "What is the walking_booster_x10 QA convention?", expected: ["walking_booster_x10"] },
