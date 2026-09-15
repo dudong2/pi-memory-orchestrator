@@ -15,6 +15,7 @@ import { RetainOutbox } from "./hindsight/outbox.js";
 import { ScopedHindsightProvider, type RecallOutcome } from "./hindsight/provider.js";
 import { registerLongMemoryTool } from "./hindsight/tools.js";
 import { enqueueProjectMemoryMirror } from "./mirror.js";
+import { rebuildMarkersFromScopeIndex } from "./scope/marker.js";
 import { resolveScope, ScopeBoundaryError, type ResolvedScope } from "./scope/resolver.js";
 
 export interface ExtensionDependencies {
@@ -83,9 +84,14 @@ function formatMemoryContext(memories: RecallMemory[], existingPrompt: string): 
 
 function describeScope(scope: ResolvedScope | null): string {
   if (!scope) return "unresolved";
-  return scope.repositoryId
-    ? `${scope.marker.displayName} / ${scope.repositoryId}`
-    : scope.marker.displayName;
+  const hierarchy = scope.ancestors
+    .reduceRight<string[]>((names, ancestor) => {
+      names.push(ancestor.marker.displayName);
+      return names;
+    }, [])
+    .concat(scope.marker.displayName)
+    .join(" / ");
+  return scope.repositoryId ? `${hierarchy} (${scope.repositoryId})` : hierarchy;
 }
 
 export function createMemoryOrchestratorExtension(dependencies: ExtensionDependencies = {}) {
@@ -173,7 +179,7 @@ export function createMemoryOrchestratorExtension(dependencies: ExtensionDepende
       },
     });
 
-    const unavailableScopeMessage = "Long-term project memory is disabled at HOME; start Pi or OMP inside a workspace directory.";
+    const unavailableScopeMessage = "Long-term project memory scope could not be resolved from this filesystem location.";
 
     pi.registerCommand("memory-orchestrator-recall", {
       description: "Run a scoped Hindsight recall without enabling automatic context injection.",
@@ -243,6 +249,15 @@ export function createMemoryOrchestratorExtension(dependencies: ExtensionDepende
       handler: async (_args, ctx) => {
         const result = await provider.drain(undefined, 100);
         ctx.ui.notify(`Memory outbox: ${JSON.stringify(result)}`, result.failed ? "warning" : "info");
+      },
+    });
+
+    pi.registerCommand("memory-orchestrator-rebuild-markers", {
+      description: "Restore missing scope markers from the central scope index.",
+      handler: async (args, ctx) => {
+        const root = args.trim() || ctx.cwd;
+        const result = await rebuildMarkersFromScopeIndex(join(config.dataDir, "scope-index.json"), { root });
+        ctx.ui.notify(`Marker recovery: ${JSON.stringify(result)}`, "info");
       },
     });
 

@@ -13,19 +13,19 @@ The active shared bank is `coding-agent::dudong2`. Former `user-knowledge` and p
 
 ## Scope
 
-The nearest local-only `.pi-memory-scope.json` file gives a logical workspace a stable identity. Child Git repositories inherit it; canonical Git remotes identify repository scopes. The marker contains identity metadata only, never memory or secrets. A marker may set `"scope": "global"`; turns retained below that marker use the reserved `scope:global` tag and are visible from every resolved workspace.
+Every Pi or OMP launch root owns a local-only `.pi-memory-scope.json` identity. A Git session materializes its marker at the main repository root even when an ancestor marker exists; a non-Git session materializes one at the launch directory. The marker contains identity metadata only, never memory or secrets.
 
-`$HOME` and the filesystem root are hard scope boundaries: their markers are neither discovered nor created. A session launched exactly at `$HOME` keeps bounded `pi-hermes-memory` available but disables project-scoped Hindsight recall and retention. When no allowed ancestor marker exists, a Git session creates one at the repository root. A non-Git session creates one at its starting directory with a deterministic `path:<sha256>` workspace ID. Paths below `$HOME` are hashed as normalized home-relative paths, so the ID survives an operating-system username change when the relative directory layout stays the same; paths outside `$HOME` use their normalized absolute path.
-
-Normal recall sends one native Hindsight compound filter for:
+Hierarchy is derived from the markers' current filesystem positions rather than persisted parent IDs. Moving a marker-bearing directory preserves its identity while recomputing its nearest marked ancestors. A repository session therefore recalls:
 
 ```text
-global OR current workspace OR current repository
+global OR marked ancestors (root to leaf) OR current repository
 ```
 
-A global marker searches only `scope:global`, so it is suitable for a dedicated general-knowledge scratchpad. Ordinary markers omit `scope` (or set it to `"workspace"`).
+Sibling repository details are excluded by default. Naming any repository registered in the central scope catalog adds that repository for the current query; workspace-wide intent adds repositories physically contained by the nearest marked workspace ancestor.
 
-A query that explicitly names a sibling repository or asks for cross-repository/workspace-wide context expands the filter to the selected child repositories. Global knowledge remains included in every query mode.
+`$HOME` may own and contribute an ordinary ancestor scope when Pi or OMP is launched there. The filesystem root remains forbidden. A marker may instead set `"scope": "global"`; that marker retains and recalls only `scope:global`.
+
+Non-Git IDs use a normalized path hash when first created. Paths below `$HOME` are normalized relative to HOME. The central scope index stores a full marker snapshot plus portable paths, allowing missing markers to be restored lazily during scope resolution or eagerly with the rebuild command. Marker files can likewise rebuild a lost index.
 
 ## Lifecycle
 
@@ -46,6 +46,7 @@ Commands:
 - `/memory-orchestrator-retain [workspace] <content>`
 - `/memory-orchestrator-drain`
 - `/memory-orchestrator-pages`
+- `/memory-orchestrator-rebuild-markers [root]`
 
 ## Configuration
 
@@ -60,8 +61,8 @@ Default file: `~/.config/pi-memory-orchestrator/config.json`.
   "requestTimeoutMs": 30000,
   "targetTimeoutMs": 5000,
   "maxRecallTokens": 4096,
-  "recallTypes": ["observation", "world", "experience"],
-  "preferObservations": true,
+  "recallTypes": ["observation"],
+  "preferObservations": false,
   "dataDir": "~/.local/share/pi-memory-orchestrator",
   "markerName": ".pi-memory-scope.json"
 }

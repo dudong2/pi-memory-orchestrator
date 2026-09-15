@@ -77,7 +77,7 @@ export async function ensureKnowledgeViews(
   const shared = await ensureFolder(api, bankId, tree.roots, "Coding Workspaces", undefined, signal);
   if (shared.created) createdFolders++;
 
-  if (scope.marker.scope === "global") {
+  if (scope.kind === "global") {
     if (await ensurePage(api, bankId, shared.children, {
       name: "Global knowledge",
       source_query: "Maintain a concise current overview of reusable general knowledge, conventions, decisions, corrections, and durable lessons shared across every coding workspace.",
@@ -89,29 +89,42 @@ export async function ensureKnowledgeViews(
     return { createdFolders, createdPages };
   }
 
-  const workspaceName = `${scope.marker.displayName} [${scope.marker.workspaceId}]`;
-  const workspace = await ensureFolder(api, bankId, shared.children, workspaceName, shared.id, signal);
-  if (workspace.created) createdFolders++;
-
-  if (await ensurePage(api, bankId, workspace.children, {
-    name: "Workspace overview",
-    source_query: "Maintain a concise current overview of shared architecture, conventions, decisions, corrections, and cross-repository dependencies for this workspace. Preserve important temporal changes.",
-    parent_id: workspace.id,
-    tags: [scope.workspaceTag],
-    max_tokens: 2_048,
-    trigger: pageTrigger(),
-  }, signal)) createdPages++;
-
-  if (scope.repositoryId && scope.repositoryTag) {
-    const repoName = scope.repositoryId.split("/").slice(-2).join("/");
-    if (await ensurePage(api, bankId, workspace.children, {
-      name: `Repository: ${repoName}`,
-      source_query: "Maintain a concise current repository overview covering architecture, conventions, decisions, pitfalls, corrections, and active initiatives. Explain temporal changes rather than silently replacing history.",
-      parent_id: workspace.id,
-      tags: [scope.repositoryTag],
+  const inheritedLayers = scope.ancestors.reduceRight<typeof scope.ancestors>((layers, layer) => {
+    if (layer.kind !== "global") layers.push(layer);
+    return layers;
+  }, []);
+  const layers = [
+    ...inheritedLayers,
+    {
+      root: scope.workspaceRoot,
+      markerPath: scope.markerPath,
+      marker: scope.marker,
+      kind: scope.kind,
+      tag: scope.scopeTag,
+      ...(scope.repositoryId ? { repositoryId: scope.repositoryId } : {}),
+    },
+  ];
+  let siblings = shared.children;
+  let parentId = shared.id;
+  for (const layer of layers) {
+    const folderName = `${layer.marker.displayName} [${layer.marker.workspaceId}]`;
+    const folder = await ensureFolder(api, bankId, siblings, folderName, parentId, signal);
+    if (folder.created) createdFolders++;
+    const repository = layer.kind === "repository" && layer.repositoryId;
+    if (await ensurePage(api, bankId, folder.children, {
+      name: repository
+        ? `Repository: ${repository.split("/").slice(-2).join("/")}`
+        : "Workspace overview",
+      source_query: repository
+        ? "Maintain a concise current repository overview covering architecture, conventions, decisions, pitfalls, corrections, and active initiatives. Explain temporal changes rather than silently replacing history."
+        : "Maintain a concise current overview of shared architecture, conventions, decisions, corrections, and cross-repository dependencies for this workspace. Preserve important temporal changes.",
+      parent_id: folder.id,
+      tags: [layer.tag],
       max_tokens: 2_048,
       trigger: pageTrigger(),
     }, signal)) createdPages++;
+    siblings = folder.children;
+    parentId = folder.id;
   }
 
   return { createdFolders, createdPages };

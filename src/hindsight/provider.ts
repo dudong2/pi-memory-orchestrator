@@ -19,12 +19,12 @@ export interface TurnIdentity {
 }
 
 function currentScopeTag(scope: ResolvedScope): string {
-  if (scope.marker.scope === "global") return GLOBAL_SCOPE_TAG;
-  return scope.repositoryTag ?? scope.workspaceTag;
+  return scope.scopeTag;
 }
 
 function workspaceScopeTag(scope: ResolvedScope): string {
-  return scope.marker.scope === "global" ? GLOBAL_SCOPE_TAG : scope.workspaceTag;
+  if (scope.kind !== "repository") return scope.scopeTag;
+  return scope.ancestors.find((ancestor) => ancestor.kind === "workspace")?.tag ?? scope.scopeTag;
 }
 
 export class ScopedHindsightProvider {

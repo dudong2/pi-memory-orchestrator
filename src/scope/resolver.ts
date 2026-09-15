@@ -1,19 +1,31 @@
-import { mkdir, open, readFile, realpath } from "node:fs/promises";
+import { mkdir, open, readFile, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { DEFAULT_CONFIG } from "../config.js";
+import { GLOBAL_SCOPE_TAG } from "./query.js";
 import { resolveGitContext, type GitContext } from "./git.js";
 import {
   DEFAULT_MARKER_NAME,
   ensureMarker,
-  findIndexedMarker,
-  findNearestMarker,
   pathWorkspaceId,
   readWorkspaceMarker,
   registerRepository,
+  restoreIndexedMarker,
   updateScopeIndex,
+  type ScopeIndex,
   type WorkspaceMarker,
 } from "./marker.js";
+
+export type ScopeKind = "global" | "workspace" | "repository";
+
+export interface ScopeLayer {
+  root: string;
+  markerPath: string;
+  marker: WorkspaceMarker;
+  kind: ScopeKind;
+  tag: string;
+  repositoryId?: string;
+}
 
 export interface ResolvedScope {
   workspaceRoot: string;
@@ -23,19 +35,28 @@ export interface ResolvedScope {
   repositoryId?: string;
   repositoryTag?: string;
   git: GitContext | null;
+  /** The one Hindsight tag owned by the marker at workspaceRoot. */
+  scopeTag: string;
+  kind: ScopeKind;
+  /** Nearest physical ancestor first. Relationships are derived, never persisted. */
+  ancestors: ScopeLayer[];
+  /** Every repository known to the local catalog, for explicit cross-repository lookup. */
+  knownRepositoryIds: string[];
+  /** Repositories physically contained by the nearest workspace ancestor. */
+  workspaceRepositoryIds: string[];
 }
 
 export interface ResolveScopeOptions {
   markerName?: string;
   dataDir?: string;
   startCwd?: string;
-  /** Test override for the HOME search and creation boundary. */
+  /** Test override for HOME-relative recovery paths. */
   homeDir?: string;
 }
 
 export class ScopeBoundaryError extends Error {
   constructor(path: string) {
-    super(`Home directory cannot be used as a memory workspace: ${path}`);
+    super(`Filesystem root cannot be used as a memory workspace: ${path}`);
     this.name = "ScopeBoundaryError";
   }
 }
@@ -53,9 +74,18 @@ function isPathWithin(path: string, root: string): boolean {
   return child === "" || (!child.startsWith("..") && !isAbsolute(child));
 }
 
-function isForbiddenWorkspaceRoot(path: string, home: string): boolean {
+function isFilesystemRoot(path: string): boolean {
   const candidate = resolve(path);
-  return dirname(candidate) === candidate || isPathWithin(home, candidate);
+  return dirname(candidate) === candidate;
+}
+
+async function markerExists(path: string): Promise<boolean> {
+  try {
+    return (await stat(path)).isFile();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
 }
 
 async function excludeLocalMarker(
@@ -76,12 +106,87 @@ async function excludeLocalMarker(
   if (content.split(/\r?\n/).includes(rule)) return;
   const handle = await open(excludePath, "a", 0o600);
   try {
-    await handle.write(
-      `${content && !content.endsWith("\n") ? "\n" : ""}${rule}\n`,
-    );
+    await handle.write(`${content && !content.endsWith("\n") ? "\n" : ""}${rule}\n`);
   } finally {
     await handle.close();
   }
+}
+
+function scopeLayer(
+  root: string,
+  markerPath: string,
+  marker: WorkspaceMarker,
+  git: GitContext | null,
+): ScopeLayer {
+  if (marker.scope === "global") {
+    return { root, markerPath, marker, kind: "global", tag: GLOBAL_SCOPE_TAG };
+  }
+  if (git && resolve(git.mainRoot) === resolve(root)) {
+    return {
+      root,
+      markerPath,
+      marker,
+      kind: "repository",
+      tag: `scope:repo:${git.repositoryId}`,
+      repositoryId: git.repositoryId,
+    };
+  }
+  return {
+    root,
+    markerPath,
+    marker,
+    kind: "workspace",
+    tag: `scope:workspace:${marker.workspaceId}`,
+  };
+}
+
+async function ancestorLayers(
+  currentRoot: string,
+  markerName: string,
+): Promise<ScopeLayer[]> {
+  const layers: ScopeLayer[] = [];
+  let current = dirname(currentRoot);
+  while (!isFilesystemRoot(current)) {
+    const markerPath = join(current, markerName);
+    if (await markerExists(markerPath)) {
+      const marker = await readWorkspaceMarker(markerPath);
+      layers.push(scopeLayer(current, markerPath, marker, resolveGitContext(current)));
+    }
+    current = dirname(current);
+  }
+  return layers;
+}
+
+async function readScopeIndex(indexPath: string): Promise<ScopeIndex> {
+  try {
+    const index = JSON.parse(await readFile(indexPath, "utf8")) as ScopeIndex;
+    if (index.version === 1 && index.workspaces && typeof index.workspaces === "object") return index;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  return { version: 1, workspaces: {} };
+}
+
+function catalogRepositories(index: ScopeIndex): string[] {
+  return [...new Set(Object.values(index.workspaces).flatMap((entry) => entry.repositories))]
+    .sort((a, b) => a.localeCompare(b));
+}
+
+function workspaceRepositories(
+  index: ScopeIndex,
+  root: string | undefined,
+  currentRepositoryId: string | undefined,
+): string[] {
+  const repositories = new Set<string>();
+  if (currentRepositoryId) repositories.add(currentRepositoryId);
+  if (root) {
+    for (const entry of Object.values(index.workspaces)) {
+      const markerRoot = dirname(entry.markerPath);
+      if (!isPathWithin(markerRoot, root)) continue;
+      for (const repository of entry.repositories) repositories.add(repository);
+    }
+  }
+  return [...repositories].sort((a, b) => a.localeCompare(b));
 }
 
 export async function resolveScope(
@@ -93,75 +198,50 @@ export async function resolveScope(
   const dataDir = options.dataDir ?? DEFAULT_CONFIG.dataDir;
   const home = await canonicalPath(options.homeDir ?? homedir());
   const git = resolveGitContext(resolvedCwd);
-  const searchBoundary = isPathWithin(resolvedCwd, home) ? home : undefined;
+  const workspaceRoot = await canonicalPath(git?.mainRoot ?? options.startCwd ?? resolvedCwd);
+  if (isFilesystemRoot(workspaceRoot)) throw new ScopeBoundaryError(workspaceRoot);
 
-  let markerPath = await findNearestMarker(
-    resolvedCwd,
-    markerName,
-    searchBoundary,
-  );
-  if (!markerPath && git && resolve(git.mainRoot) !== resolvedCwd) {
-    markerPath = await findNearestMarker(
-      git.mainRoot,
-      markerName,
-      searchBoundary,
-    );
-  }
-  if (!markerPath) {
-    const indexed = await findIndexedMarker(
-      join(dataDir, "scope-index.json"),
-      resolvedCwd,
+  const indexPath = join(dataDir, "scope-index.json");
+  let markerPath = join(workspaceRoot, markerName);
+  if (!(await markerExists(markerPath))) {
+    markerPath = await restoreIndexedMarker(
+      indexPath,
+      workspaceRoot,
       git?.repositoryId,
-    );
-    if (
-      indexed &&
-      !isForbiddenWorkspaceRoot(await canonicalPath(dirname(indexed)), home)
-    ) {
-      try {
-        await readWorkspaceMarker(indexed);
-        markerPath = indexed;
-      } catch {
-        // The index is derived state. Ignore a stale or invalid target and create a new marker.
-      }
-    }
+      home,
+      markerName,
+    ) ?? markerPath;
   }
 
-  const workspaceRoot = markerPath
-    ? dirname(markerPath)
-    : (git?.mainRoot ?? (await canonicalPath(options.startCwd ?? resolvedCwd)));
-  if (isForbiddenWorkspaceRoot(workspaceRoot, home))
-    throw new ScopeBoundaryError(workspaceRoot);
-  markerPath ??= join(workspaceRoot, markerName);
-
-  const generatedWorkspaceId = git
-    ? undefined
-    : pathWorkspaceId(workspaceRoot, home);
-  let marker = await ensureMarker(
-    markerPath,
-    workspaceRoot,
-    generatedWorkspaceId,
-  );
+  const generatedWorkspaceId = git ? undefined : pathWorkspaceId(workspaceRoot, home);
+  let marker = await ensureMarker(markerPath, workspaceRoot, generatedWorkspaceId);
   if (git) {
     marker = await registerRepository(markerPath, git.repositoryId);
     await excludeLocalMarker(git, markerPath, markerName);
   }
-  await updateScopeIndex(
-    join(dataDir, "scope-index.json"),
-    markerPath,
-    marker,
-    resolvedCwd,
-  );
+  await updateScopeIndex(indexPath, markerPath, marker, workspaceRoot, home);
 
-  const result: ResolvedScope = {
+  const current = scopeLayer(workspaceRoot, markerPath, marker, git);
+  const ancestors = await ancestorLayers(workspaceRoot, markerName);
+  for (const ancestor of ancestors) {
+    await updateScopeIndex(indexPath, ancestor.markerPath, ancestor.marker, ancestor.root, home);
+  }
+  const index = await readScopeIndex(indexPath);
+  const nearestWorkspaceRoot = ancestors.find((layer) => layer.kind === "workspace")?.root;
+  const repositoryId = current.repositoryId;
+  const repositoryTag = repositoryId ? `scope:repo:${repositoryId}` : undefined;
+
+  return {
     workspaceRoot,
     markerPath,
     marker,
     workspaceTag: `scope:workspace:${marker.workspaceId}`,
+    ...(repositoryId ? { repositoryId, repositoryTag } : {}),
     git,
+    scopeTag: current.tag,
+    kind: current.kind,
+    ancestors,
+    knownRepositoryIds: catalogRepositories(index),
+    workspaceRepositoryIds: workspaceRepositories(index, nearestWorkspaceRoot, repositoryId),
   };
-  if (git) {
-    result.repositoryId = git.repositoryId;
-    result.repositoryTag = `scope:repo:${git.repositoryId}`;
-  }
-  return result;
 }

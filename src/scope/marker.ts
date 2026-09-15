@@ -9,6 +9,7 @@ import {
   unlink,
   writeFile,
 } from "node:fs/promises";
+import { homedir } from "node:os";
 import {
   basename,
   dirname,
@@ -38,6 +39,11 @@ export interface ScopeIndexEntry {
   paths: string[];
   repositories: string[];
   updatedAt: string;
+  /** Full local identity snapshot used to rebuild a missing marker on another machine. */
+  marker?: WorkspaceMarker;
+  /** HOME-relative when possible so a restored index survives a username change. */
+  portableMarkerRoot?: string;
+  portablePaths?: string[];
 }
 
 export interface ScopeIndex {
@@ -135,6 +141,23 @@ export async function findNearestMarker(
 
 function portablePath(path: string): string {
   return path.split(sep).join("/").normalize("NFC");
+}
+
+export function portableScopePath(path: string, home = homedir()): string {
+  const absolute = resolve(path);
+  const absoluteHome = resolve(home);
+  const homeRelative = relative(absoluteHome, absolute);
+  if (homeRelative === "") return "~";
+  if (!homeRelative.startsWith("..") && !isAbsolute(homeRelative)) {
+    return `~/${portablePath(homeRelative)}`;
+  }
+  return portablePath(absolute);
+}
+
+export function resolvePortableScopePath(path: string, home = homedir()): string {
+  if (path === "~") return resolve(home);
+  if (path.startsWith("~/")) return resolve(home, path.slice(2));
+  return resolve(path);
 }
 
 export function pathWorkspaceId(root: string, home: string): string {
@@ -313,6 +336,95 @@ export async function findIndexedMarker(
   return matches[0]?.entry.markerPath ?? null;
 }
 
+export async function restoreIndexedMarker(
+  indexPath: string,
+  root: string,
+  repositoryId?: string,
+  home = homedir(),
+  markerName = DEFAULT_MARKER_NAME,
+): Promise<string | null> {
+  let index: ScopeIndex;
+  try {
+    index = JSON.parse(await readFile(indexPath, "utf8")) as ScopeIndex;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+  if (index.version !== 1 || !index.workspaces || typeof index.workspaces !== "object") return null;
+
+  const canonicalRoot = await canonicalPath(root);
+  const portableRoot = portableScopePath(canonicalRoot, home);
+  const entries = Object.values(index.workspaces).filter((entry) => entry.marker);
+  let match = entries.find((entry) =>
+    entry.portableMarkerRoot === portableRoot || resolve(dirname(entry.markerPath)) === canonicalRoot);
+  if (!match && repositoryId) {
+    const repositoryMatches = entries.filter((entry) => entry.repositories.includes(repositoryId));
+    const repositoryMatch = repositoryMatches.length === 1 ? repositoryMatches[0] : undefined;
+    if (repositoryMatch) {
+      try {
+        await stat(repositoryMatch.markerPath);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") match = repositoryMatch;
+        else throw error;
+      }
+    }
+  }
+  if (!match?.marker) return null;
+
+  const target = join(canonicalRoot, markerName);
+  try {
+    await stat(target);
+    return target;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  await writeJsonAtomic(target, match.marker);
+  return target;
+}
+
+export async function rebuildMarkersFromScopeIndex(
+  indexPath: string,
+  options: { homeDir?: string; root?: string; markerName?: string } = {},
+): Promise<{ restored: string[]; skipped: string[] }> {
+  const home = resolve(options.homeDir ?? homedir());
+  const onlyWithin = options.root ? resolve(options.root) : undefined;
+  const markerName = options.markerName ?? DEFAULT_MARKER_NAME;
+  let index: ScopeIndex;
+  try {
+    index = JSON.parse(await readFile(indexPath, "utf8")) as ScopeIndex;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { restored: [], skipped: [] };
+    throw error;
+  }
+  const restored: string[] = [];
+  const skipped: string[] = [];
+  for (const entry of Object.values(index.workspaces)) {
+    if (!entry.marker || !entry.portableMarkerRoot) continue;
+    const root = resolvePortableScopePath(entry.portableMarkerRoot, home);
+    if (onlyWithin && root !== onlyWithin && !root.startsWith(`${onlyWithin}${sep}`)) continue;
+    try {
+      if (!(await stat(root)).isDirectory()) {
+        skipped.push(root);
+        continue;
+      }
+    } catch {
+      skipped.push(root);
+      continue;
+    }
+    const target = join(root, markerName);
+    try {
+      await stat(target);
+      skipped.push(target);
+      continue;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    await writeJsonAtomic(target, entry.marker);
+    restored.push(target);
+  }
+  return { restored, skipped };
+}
+
 export async function removeWorkspaceFromScopeIndex(
   indexPath: string,
   workspaceId: string,
@@ -347,6 +459,7 @@ export async function updateScopeIndex(
   markerPath: string,
   marker: WorkspaceMarker,
   observedPath: string,
+  home = homedir(),
 ): Promise<void> {
   const release = await acquireLock(`${indexPath}.lock`);
   try {
@@ -367,19 +480,21 @@ export async function updateScopeIndex(
     const previous = index.workspaces[marker.workspaceId];
     const canonicalObservedPath = await canonicalPath(observedPath);
     const canonicalMarkerRoot = await canonicalPath(dirname(markerPath));
+    const paths = [
+      ...new Set([
+        ...(previous?.paths ?? []),
+        canonicalObservedPath,
+        canonicalMarkerRoot,
+      ]),
+    ].sort((a, b) => a.localeCompare(b));
     index.workspaces[marker.workspaceId] = {
       markerPath,
-      paths: [
-        ...new Set([
-          ...(previous?.paths ?? []),
-          canonicalObservedPath,
-          canonicalMarkerRoot,
-        ]),
-      ].sort((a, b) => a.localeCompare(b)),
-      repositories: [
-        ...new Set([...(previous?.repositories ?? []), ...marker.repositories]),
-      ].sort((a, b) => a.localeCompare(b)),
+      paths,
+      repositories: [...new Set(marker.repositories)].sort((a, b) => a.localeCompare(b)),
       updatedAt: new Date().toISOString(),
+      marker,
+      portableMarkerRoot: portableScopePath(canonicalMarkerRoot, home),
+      portablePaths: paths.map((path) => portableScopePath(path, home)),
     };
     await writeJsonAtomic(indexPath, index);
   } finally {

@@ -5,6 +5,8 @@ import {
   mkdir,
   readFile,
   realpath,
+  rename,
+  unlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -15,6 +17,7 @@ import {
   ensureMarker,
   pathWorkspaceId,
   readWorkspaceMarker,
+  rebuildMarkersFromScopeIndex,
   registerRepository,
   removeWorkspaceFromScopeIndex,
   updateScopeIndex,
@@ -41,16 +44,17 @@ test("canonicalizeGitRemote normalizes SSH and HTTPS remotes", () => {
   assert.equal(canonicalizeGitRemote("file:///tmp/repo"), undefined);
 });
 
-test("non-Git cwd creates and reuses a local workspace marker", async () => {
+test("each non-Git launch root owns a scope and inherits physical ancestors", async () => {
   const root = await tempRoot("memory-scope-nongit-");
   const child = join(root, "child", "nested");
   const dataDir = join(root, "state");
   await mkdir(child, { recursive: true });
-  const first = await resolveScope(root, { dataDir, startCwd: root });
-  const second = await resolveScope(child, { dataDir, startCwd: child });
-  assert.equal(second.marker.workspaceId, first.marker.workspaceId);
-  assert.equal(second.markerPath, first.markerPath);
-  assert.equal(second.repositoryId, undefined);
+  const parent = await resolveScope(root, { dataDir, startCwd: root });
+  const current = await resolveScope(child, { dataDir, startCwd: child });
+  assert.notEqual(current.marker.workspaceId, parent.marker.workspaceId);
+  assert.equal(await realpath(current.markerPath), await realpath(join(child, ".pi-memory-scope.json")));
+  assert.equal(current.scopeTag, current.workspaceTag);
+  assert.deepEqual(current.ancestors.map((layer) => layer.marker.workspaceId), [parent.marker.workspaceId]);
 });
 
 test("non-Git workspace IDs survive a HOME username change", async () => {
@@ -79,7 +83,7 @@ test("non-Git workspace IDs survive a HOME username change", async () => {
   assert.equal(first.marker.workspaceId, pathWorkspaceId(firstRoot, firstHome));
 });
 
-test("a HOME marker and stale HOME scope-index entry do not capture a Git repository", async () => {
+test("a HOME scope is inherited but does not capture a Git repository", async () => {
   const home = await tempRoot("memory-scope-home-boundary-");
   const dataDir = join(home, "state");
   const homeMarkerPath = join(home, ".pi-memory-scope.json");
@@ -110,22 +114,18 @@ test("a HOME marker and stale HOME scope-index entry do not capture a Git reposi
     await realpath(repository),
   );
   assert.notEqual(scope.marker.workspaceId, homeMarker.workspaceId);
-  assert.deepEqual(scope.marker.repositories, [
-    "github.com/dudong2/home-boundary",
-  ]);
+  assert.equal(scope.kind, "repository");
+  assert.deepEqual(scope.ancestors.map((layer) => layer.marker.workspaceId), [homeMarker.workspaceId]);
+  assert.deepEqual(scope.marker.repositories, ["github.com/dudong2/home-boundary"]);
 });
 
-test("HOME itself cannot become a filesystem workspace", async () => {
+test("HOME itself can own a scope", async () => {
   const home = await tempRoot("memory-scope-home-root-");
   const dataDir = join(home, "state");
-
-  await assert.rejects(
-    resolveScope(home, { dataDir, homeDir: home } as Parameters<
-      typeof resolveScope
-    >[1]),
-    /home directory cannot be used as a memory workspace/i,
-  );
-  await assert.rejects(readFile(join(home, ".pi-memory-scope.json")));
+  const scope = await resolveScope(home, { dataDir, homeDir: home });
+  assert.equal(scope.workspaceRoot, await realpath(home));
+  assert.equal(scope.markerPath, join(await realpath(home), ".pi-memory-scope.json"));
+  assert.equal(scope.kind, "workspace");
 });
 
 test("Git scope uses canonical remote and excludes the local marker", async () => {
@@ -141,7 +141,7 @@ test("Git scope uses canonical remote and excludes the local marker", async () =
   assert.match(exclude, /^\/\.pi-memory-scope\.json$/m);
 });
 
-test("a global marker is parsed and inherited by nested folders", async () => {
+test("a global marker is inherited by a nested launch scope", async () => {
   const root = await tempRoot("memory-scope-global-");
   const markerPath = join(root, ".pi-memory-scope.json");
   await writeFile(
@@ -160,11 +160,12 @@ test("a global marker is parsed and inherited by nested folders", async () => {
   await mkdir(child);
 
   const scope = await resolveScope(child, { dataDir: join(root, "state") });
-  assert.equal(await realpath(scope.markerPath), await realpath(markerPath));
-  assert.equal(scope.marker.scope, "global");
+  assert.notEqual(await realpath(scope.markerPath), await realpath(markerPath));
+  assert.equal(scope.kind, "workspace");
+  assert.deepEqual(scope.ancestors.map((layer) => layer.tag), ["scope:global"]);
 });
 
-test("child repositories inherit their nearest parent marker", async () => {
+test("child repositories own markers and inherit their nearest parent scope", async () => {
   const root = await tempRoot("memory-scope-parent-");
   const dataDir = join(root, "state");
   const parent = await resolveScope(root, { dataDir });
@@ -179,8 +180,10 @@ test("child repositories inherit their nearest parent marker", async () => {
     "https://github.com/dudong2/frontend.git",
   );
   const nested = await resolveScope(child, { dataDir });
-  assert.equal(nested.marker.workspaceId, parent.marker.workspaceId);
-  assert.equal(nested.markerPath, parent.markerPath);
+  assert.notEqual(nested.marker.workspaceId, parent.marker.workspaceId);
+  assert.equal(await realpath(nested.markerPath), await realpath(join(child, ".pi-memory-scope.json")));
+  assert.equal(nested.scopeTag, "scope:repo:github.com/dudong2/frontend");
+  assert.deepEqual(nested.ancestors.map((layer) => layer.marker.workspaceId), [parent.marker.workspaceId]);
   assert.deepEqual(nested.marker.repositories, ["github.com/dudong2/frontend"]);
 });
 
@@ -198,23 +201,58 @@ test("concurrent repository registration loses no updates", async () => {
   assert.deepEqual(marker.repositories, [...repositories].sort());
 });
 
-test("a scope-index path alias reconnects a moved temp workspace", async () => {
-  const root = await tempRoot("memory-scope-alias-");
-  const original = join(root, "original");
-  const moved = join(root, "moved");
+test("a marker preserves identity across a directory move while hierarchy is recomputed", async () => {
+  const root = await tempRoot("memory-scope-move-");
+  const firstParent = join(root, "first-parent");
+  const secondParent = join(root, "second-parent");
+  const original = join(firstParent, "project");
+  const moved = join(secondParent, "renamed");
   const dataDir = join(root, "state");
-  await mkdir(original);
-  await mkdir(moved);
+  await mkdir(original, { recursive: true });
+  await mkdir(secondParent);
+  const firstAncestor = await resolveScope(firstParent, { dataDir });
+  const secondAncestor = await resolveScope(secondParent, { dataDir });
   const first = await resolveScope(original, { dataDir });
-  await updateScopeIndex(
-    join(dataDir, "scope-index.json"),
-    first.markerPath,
-    first.marker,
-    moved,
-  );
+  await rename(original, moved);
   const second = await resolveScope(moved, { dataDir });
   assert.equal(second.marker.workspaceId, first.marker.workspaceId);
-  assert.equal(second.markerPath, first.markerPath);
+  assert.deepEqual(first.ancestors.map((layer) => layer.marker.workspaceId), [firstAncestor.marker.workspaceId]);
+  assert.deepEqual(second.ancestors.map((layer) => layer.marker.workspaceId), [secondAncestor.marker.workspaceId]);
+});
+
+test("scope index restores a missing marker at the same portable path", async () => {
+  const home = await tempRoot("memory-scope-restore-");
+  const root = join(home, "workspace", "project");
+  const dataDir = join(home, "state");
+  await mkdir(root, { recursive: true });
+  const first = await resolveScope(root, { dataDir, homeDir: home });
+  await unlink(first.markerPath);
+  const restored = await resolveScope(root, { dataDir, homeDir: home });
+  assert.equal(restored.marker.workspaceId, first.marker.workspaceId);
+  assert.equal(restored.markerPath, first.markerPath);
+});
+
+test("scope index rebuild restores every missing marker under a selected root", async () => {
+  const home = await tempRoot("memory-scope-rebuild-");
+  const firstRoot = join(home, "workspace", "first");
+  const secondRoot = join(home, "workspace", "second");
+  const dataDir = join(home, "state");
+  await mkdir(firstRoot, { recursive: true });
+  await mkdir(secondRoot, { recursive: true });
+  const first = await resolveScope(firstRoot, { dataDir, homeDir: home });
+  const second = await resolveScope(secondRoot, { dataDir, homeDir: home });
+  await unlink(first.markerPath);
+  await unlink(second.markerPath);
+  const result = await rebuildMarkersFromScopeIndex(join(dataDir, "scope-index.json"), {
+    homeDir: home,
+    root: join(home, "workspace"),
+  });
+  assert.deepEqual(
+    (await Promise.all(result.restored.map((path) => realpath(path)))).sort(),
+    (await Promise.all([first.markerPath, second.markerPath].map((path) => realpath(path)))).sort(),
+  );
+  assert.equal((await readWorkspaceMarker(first.markerPath)).workspaceId, first.marker.workspaceId);
+  assert.equal((await readWorkspaceMarker(second.markerPath)).workspaceId, second.marker.workspaceId);
 });
 
 test("scope-index cleanup removes only the selected workspace", async () => {

@@ -21,6 +21,11 @@ const scope: ResolvedScope = {
   repositoryId: "github.com/dudong2/project",
   repositoryTag: "scope:repo:github.com/dudong2/project",
   git: null,
+  scopeTag: "scope:repo:github.com/dudong2/project",
+  kind: "repository",
+  ancestors: [],
+  knownRepositoryIds: ["github.com/dudong2/project"],
+  workspaceRepositoryIds: ["github.com/dudong2/project"],
 };
 
 function harness(mode: "shadow" | "active", resolvedScope: ResolvedScope | null = scope) {
@@ -96,7 +101,7 @@ test("shadow mode captures turns but exposes no tool or automatic recall", async
   assert.equal(runtime.calls.enqueued, 1);
 });
 
-test("HOME sessions fail open without scoped recall or retention", async () => {
+test("unresolved filesystems fail open without scoped recall or retention", async () => {
   const runtime = harness("active", null);
   const ctx = context(runtime.notifications);
   await runtime.handlers.get("session_start")?.[0]?.({}, ctx);
@@ -110,7 +115,7 @@ test("HOME sessions fail open without scoped recall or retention", async () => {
   assert.equal(injection, undefined);
   assert.equal(runtime.calls.recall, 0);
   assert.equal(runtime.calls.enqueued, 0);
-  assert.ok(runtime.notifications.some(({ message }) => /disabled at HOME/.test(message)));
+  assert.ok(runtime.notifications.some(({ message }) => /could not be resolved/.test(message)));
 });
 
 test("successful bounded project writes enqueue a long-term mirror", async () => {

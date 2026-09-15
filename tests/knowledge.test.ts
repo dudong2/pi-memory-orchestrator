@@ -20,6 +20,11 @@ const scope: ResolvedScope = {
   repositoryId: "github.com/dudong2/frontend",
   repositoryTag: "scope:repo:github.com/dudong2/frontend",
   git: null,
+  scopeTag: "scope:repo:github.com/dudong2/frontend",
+  kind: "repository",
+  ancestors: [],
+  knownRepositoryIds: ["github.com/dudong2/frontend"],
+  workspaceRepositoryIds: ["github.com/dudong2/frontend"],
 };
 
 class FakeKnowledgeApi implements KnowledgeApi {
@@ -51,12 +56,12 @@ class FakeKnowledgeApi implements KnowledgeApi {
   }
 }
 
-test("knowledge views are idempotent and strictly scope filtered", async () => {
+test("a repository marker creates one strictly filtered knowledge page", async () => {
   const api = new FakeKnowledgeApi();
-  assert.deepEqual(await ensureKnowledgeViews(api, "bank", scope), { createdFolders: 2, createdPages: 2 });
+  assert.deepEqual(await ensureKnowledgeViews(api, "bank", scope), { createdFolders: 2, createdPages: 1 });
   assert.deepEqual(await ensureKnowledgeViews(api, "bank", scope), { createdFolders: 0, createdPages: 0 });
-  assert.equal(api.pages.length, 2);
-  assert.deepEqual(api.pages.map((page) => page.tags), [[scope.workspaceTag], [scope.repositoryTag]]);
+  assert.equal(api.pages.length, 1);
+  assert.deepEqual(api.pages.map((page) => page.tags), [[scope.scopeTag]]);
   for (const page of api.pages) {
     assert.equal(page.trigger?.tags_match, "all_strict");
     assert.deepEqual(page.trigger?.fact_types, ["observation"]);
@@ -71,6 +76,11 @@ test("a global marker creates one shared knowledge page", async () => {
     marker: { ...scope.marker, scope: "global", displayName: "scratchpad", repositories: [] },
     repositoryId: undefined,
     repositoryTag: undefined,
+    scopeTag: GLOBAL_SCOPE_TAG,
+    kind: "global",
+    ancestors: [],
+    knownRepositoryIds: [],
+    workspaceRepositoryIds: [],
   };
   assert.deepEqual(await ensureKnowledgeViews(api, "bank", globalScope), { createdFolders: 1, createdPages: 1 });
   assert.deepEqual(await ensureKnowledgeViews(api, "bank", globalScope), { createdFolders: 0, createdPages: 0 });

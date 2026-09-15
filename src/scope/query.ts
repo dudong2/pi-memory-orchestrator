@@ -31,7 +31,12 @@ function repositoryAliases(repositoryId: string): string[] {
   const segments = repositoryId.toLowerCase().split("/").filter(Boolean);
   const repo = segments.at(-1) ?? repositoryId.toLowerCase();
   const ownerRepo = segments.length >= 2 ? segments.slice(-2).join("/") : repo;
-  return [...new Set([repositoryId.toLowerCase(), ownerRepo, repo])];
+  const aliases = [repositoryId.toLowerCase(), ownerRepo, repo];
+  return [...new Set(aliases.flatMap((alias) => [
+    alias,
+    alias.replaceAll("_", "-"),
+    alias.replaceAll("-", "_"),
+  ]))];
 }
 
 function mentionsAlias(query: string, alias: string): boolean {
@@ -55,8 +60,8 @@ export function buildScopeQueryPlan(
   options: ScopeQueryOptions = {},
 ): ScopeQueryPlan {
   const mode = options.mode ?? "auto";
-  const globalMarker = scope.marker.scope === "global";
-  const knownRepositories = globalMarker ? [] : scope.marker.repositories;
+  const globalMarker = scope.kind === "global";
+  const knownRepositories = globalMarker ? [] : scope.knownRepositoryIds;
   const requested = new Set<string>();
   const workspaceWide = !globalMarker && (mode === "all" || (mode === "auto" && hasWorkspaceWideIntent(query)));
 
@@ -66,7 +71,7 @@ export function buildScopeQueryPlan(
       if (known.has(id)) requested.add(id);
     }
   } else if (workspaceWide) {
-    for (const id of knownRepositories) requested.add(id);
+    for (const id of scope.workspaceRepositoryIds) requested.add(id);
   } else if (mode === "auto") {
     for (const id of knownRepositories) {
       if (id === scope.repositoryId) continue;
@@ -74,20 +79,29 @@ export function buildScopeQueryPlan(
     }
   }
 
-  if (!globalMarker && mode !== "workspace" && scope.repositoryId) requested.add(scope.repositoryId);
+  const inheritedTags = globalMarker
+    ? []
+    : scope.ancestors.reduceRight<string[]>((tags, ancestor) => {
+      tags.push(ancestor.tag);
+      return tags;
+    }, []);
+  const includeCurrent = !globalMarker && (mode !== "workspace" || scope.kind !== "repository");
   const tags = [
     GLOBAL_SCOPE_TAG,
-    ...(globalMarker ? [] : [scope.workspaceTag]),
+    ...inheritedTags,
+    ...(includeCurrent ? [scope.scopeTag] : []),
     ...[...requested]
       .sort((a, b) => a.localeCompare(b))
       .map((id) => `scope:repo:${id}`),
-  ];
+  ].filter((tag, index, all) => all.indexOf(tag) === index);
   const leaves = tags.map(leaf);
 
   return {
     tags,
     tagGroups: [{ or: leaves }],
-    expandedRepositories: [...requested].filter((id) => id !== scope.repositoryId).sort((a, b) => a.localeCompare(b)),
+    expandedRepositories: [...requested]
+      .filter((id) => id !== scope.repositoryId)
+      .sort((a, b) => a.localeCompare(b)),
     workspaceWide,
   };
 }
