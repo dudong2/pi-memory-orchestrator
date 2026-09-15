@@ -106,7 +106,9 @@ async function excludeLocalMarker(
   if (content.split(/\r?\n/).includes(rule)) return;
   const handle = await open(excludePath, "a", 0o600);
   try {
-    await handle.write(`${content && !content.endsWith("\n") ? "\n" : ""}${rule}\n`);
+    await handle.write(
+      `${content && !content.endsWith("\n") ? "\n" : ""}${rule}\n`,
+    );
   } finally {
     await handle.close();
   }
@@ -150,7 +152,9 @@ async function ancestorLayers(
     const markerPath = join(current, markerName);
     if (await markerExists(markerPath)) {
       const marker = await readWorkspaceMarker(markerPath);
-      layers.push(scopeLayer(current, markerPath, marker, resolveGitContext(current)));
+      layers.push(
+        scopeLayer(current, markerPath, marker, resolveGitContext(current)),
+      );
     }
     current = dirname(current);
   }
@@ -160,7 +164,12 @@ async function ancestorLayers(
 async function readScopeIndex(indexPath: string): Promise<ScopeIndex> {
   try {
     const index = JSON.parse(await readFile(indexPath, "utf8")) as ScopeIndex;
-    if (index.version === 1 && index.workspaces && typeof index.workspaces === "object") return index;
+    if (
+      index.version === 1 &&
+      index.workspaces &&
+      typeof index.workspaces === "object"
+    )
+      return index;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
@@ -168,8 +177,11 @@ async function readScopeIndex(indexPath: string): Promise<ScopeIndex> {
 }
 
 function catalogRepositories(index: ScopeIndex): string[] {
-  return [...new Set(Object.values(index.workspaces).flatMap((entry) => entry.repositories))]
-    .sort((a, b) => a.localeCompare(b));
+  return [
+    ...new Set(
+      Object.values(index.workspaces).flatMap((entry) => entry.repositories),
+    ),
+  ].sort((a, b) => a.localeCompare(b));
 }
 
 function workspaceRepositories(
@@ -198,23 +210,33 @@ export async function resolveScope(
   const dataDir = options.dataDir ?? DEFAULT_CONFIG.dataDir;
   const home = await canonicalPath(options.homeDir ?? homedir());
   const git = resolveGitContext(resolvedCwd);
-  const workspaceRoot = await canonicalPath(git?.mainRoot ?? options.startCwd ?? resolvedCwd);
-  if (isFilesystemRoot(workspaceRoot)) throw new ScopeBoundaryError(workspaceRoot);
+  const workspaceRoot = await canonicalPath(
+    git?.mainRoot ?? options.startCwd ?? resolvedCwd,
+  );
+  if (isFilesystemRoot(workspaceRoot))
+    throw new ScopeBoundaryError(workspaceRoot);
 
   const indexPath = join(dataDir, "scope-index.json");
   let markerPath = join(workspaceRoot, markerName);
   if (!(await markerExists(markerPath))) {
-    markerPath = await restoreIndexedMarker(
-      indexPath,
-      workspaceRoot,
-      git?.repositoryId,
-      home,
-      markerName,
-    ) ?? markerPath;
+    markerPath =
+      (await restoreIndexedMarker(
+        indexPath,
+        workspaceRoot,
+        git?.repositoryId,
+        home,
+        markerName,
+      )) ?? markerPath;
   }
 
-  const generatedWorkspaceId = git ? undefined : pathWorkspaceId(workspaceRoot, home);
-  let marker = await ensureMarker(markerPath, workspaceRoot, generatedWorkspaceId);
+  const generatedWorkspaceId = git
+    ? undefined
+    : pathWorkspaceId(workspaceRoot, home);
+  let marker = await ensureMarker(
+    markerPath,
+    workspaceRoot,
+    generatedWorkspaceId,
+  );
   if (git) {
     marker = await registerRepository(markerPath, git.repositoryId);
     await excludeLocalMarker(git, markerPath, markerName);
@@ -224,10 +246,18 @@ export async function resolveScope(
   const current = scopeLayer(workspaceRoot, markerPath, marker, git);
   const ancestors = await ancestorLayers(workspaceRoot, markerName);
   for (const ancestor of ancestors) {
-    await updateScopeIndex(indexPath, ancestor.markerPath, ancestor.marker, ancestor.root, home);
+    await updateScopeIndex(
+      indexPath,
+      ancestor.markerPath,
+      ancestor.marker,
+      ancestor.root,
+      home,
+    );
   }
   const index = await readScopeIndex(indexPath);
-  const nearestWorkspaceRoot = ancestors.find((layer) => layer.kind === "workspace")?.root;
+  const nearestWorkspaceRoot = ancestors.find(
+    (layer) => layer.kind === "workspace",
+  )?.root;
   const repositoryId = current.repositoryId;
   const repositoryTag = repositoryId ? `scope:repo:${repositoryId}` : undefined;
 
@@ -242,6 +272,10 @@ export async function resolveScope(
     kind: current.kind,
     ancestors,
     knownRepositoryIds: catalogRepositories(index),
-    workspaceRepositoryIds: workspaceRepositories(index, nearestWorkspaceRoot, repositoryId),
+    workspaceRepositoryIds: workspaceRepositories(
+      index,
+      nearestWorkspaceRoot,
+      repositoryId,
+    ),
   };
 }

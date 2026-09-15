@@ -154,7 +154,10 @@ export function portableScopePath(path: string, home = homedir()): string {
   return portablePath(absolute);
 }
 
-export function resolvePortableScopePath(path: string, home = homedir()): string {
+export function resolvePortableScopePath(
+  path: string,
+  home = homedir(),
+): string {
   if (path === "~") return resolve(home);
   if (path.startsWith("~/")) return resolve(home, path.slice(2));
   return resolve(path);
@@ -350,21 +353,35 @@ export async function restoreIndexedMarker(
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw error;
   }
-  if (index.version !== 1 || !index.workspaces || typeof index.workspaces !== "object") return null;
+  if (
+    index.version !== 1 ||
+    !index.workspaces ||
+    typeof index.workspaces !== "object"
+  )
+    return null;
 
   const canonicalRoot = await canonicalPath(root);
   const portableRoot = portableScopePath(canonicalRoot, home);
-  const entries = Object.values(index.workspaces).filter((entry) => entry.marker);
-  let match = entries.find((entry) =>
-    entry.portableMarkerRoot === portableRoot || resolve(dirname(entry.markerPath)) === canonicalRoot);
+  const entries = Object.values(index.workspaces).filter(
+    (entry) => entry.marker,
+  );
+  let match = entries.find(
+    (entry) =>
+      entry.portableMarkerRoot === portableRoot ||
+      resolve(dirname(entry.markerPath)) === canonicalRoot,
+  );
   if (!match && repositoryId) {
-    const repositoryMatches = entries.filter((entry) => entry.repositories.includes(repositoryId));
-    const repositoryMatch = repositoryMatches.length === 1 ? repositoryMatches[0] : undefined;
+    const repositoryMatches = entries.filter((entry) =>
+      entry.repositories.includes(repositoryId),
+    );
+    const repositoryMatch =
+      repositoryMatches.length === 1 ? repositoryMatches[0] : undefined;
     if (repositoryMatch) {
       try {
         await stat(repositoryMatch.markerPath);
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") match = repositoryMatch;
+        if ((error as NodeJS.ErrnoException).code === "ENOENT")
+          match = repositoryMatch;
         else throw error;
       }
     }
@@ -393,7 +410,8 @@ export async function rebuildMarkersFromScopeIndex(
   try {
     index = JSON.parse(await readFile(indexPath, "utf8")) as ScopeIndex;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { restored: [], skipped: [] };
+    if ((error as NodeJS.ErrnoException).code === "ENOENT")
+      return { restored: [], skipped: [] };
     throw error;
   }
   const restored: string[] = [];
@@ -401,7 +419,12 @@ export async function rebuildMarkersFromScopeIndex(
   for (const entry of Object.values(index.workspaces)) {
     if (!entry.marker || !entry.portableMarkerRoot) continue;
     const root = resolvePortableScopePath(entry.portableMarkerRoot, home);
-    if (onlyWithin && root !== onlyWithin && !root.startsWith(`${onlyWithin}${sep}`)) continue;
+    if (
+      onlyWithin &&
+      root !== onlyWithin &&
+      !root.startsWith(`${onlyWithin}${sep}`)
+    )
+      continue;
     try {
       if (!(await stat(root)).isDirectory()) {
         skipped.push(root);
@@ -490,7 +513,9 @@ export async function updateScopeIndex(
     index.workspaces[marker.workspaceId] = {
       markerPath,
       paths,
-      repositories: [...new Set(marker.repositories)].sort((a, b) => a.localeCompare(b)),
+      repositories: [...new Set(marker.repositories)].sort((a, b) =>
+        a.localeCompare(b),
+      ),
       updatedAt: new Date().toISOString(),
       marker,
       portableMarkerRoot: portableScopePath(canonicalMarkerRoot, home),

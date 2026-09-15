@@ -3,7 +3,12 @@ import type { ResolvedScope } from "./resolver.js";
 
 export const GLOBAL_SCOPE_TAG = "scope:global";
 
-export type ScopeQueryMode = "auto" | "current" | "workspace" | "all" | "repositories";
+export type ScopeQueryMode =
+  | "auto"
+  | "current"
+  | "workspace"
+  | "all"
+  | "repositories";
 
 export interface ScopeQueryOptions {
   mode?: ScopeQueryMode;
@@ -32,18 +37,24 @@ function repositoryAliases(repositoryId: string): string[] {
   const repo = segments.at(-1) ?? repositoryId.toLowerCase();
   const ownerRepo = segments.length >= 2 ? segments.slice(-2).join("/") : repo;
   const aliases = [repositoryId.toLowerCase(), ownerRepo, repo];
-  return [...new Set(aliases.flatMap((alias) => [
-    alias,
-    alias.replaceAll("_", "-"),
-    alias.replaceAll("-", "_"),
-  ]))];
+  return [
+    ...new Set(
+      aliases.flatMap((alias) => [
+        alias,
+        alias.replaceAll("_", "-"),
+        alias.replaceAll("-", "_"),
+      ]),
+    ),
+  ];
 }
 
 function mentionsAlias(query: string, alias: string): boolean {
   const normalized = query.toLowerCase();
   if (alias.includes("/")) return normalized.includes(alias);
   const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`(?:^|[^a-z0-9])${escaped}(?:$|[^a-z0-9])`, "i").test(normalized);
+  return new RegExp(`(?:^|[^a-z0-9])${escaped}(?:$|[^a-z0-9])`, "i").test(
+    normalized,
+  );
 }
 
 export function hasWorkspaceWideIntent(query: string): boolean {
@@ -63,7 +74,9 @@ export function buildScopeQueryPlan(
   const globalMarker = scope.kind === "global";
   const knownRepositories = globalMarker ? [] : scope.knownRepositoryIds;
   const requested = new Set<string>();
-  const workspaceWide = !globalMarker && (mode === "all" || (mode === "auto" && hasWorkspaceWideIntent(query)));
+  const workspaceWide =
+    !globalMarker &&
+    (mode === "all" || (mode === "auto" && hasWorkspaceWideIntent(query)));
 
   if (mode === "repositories") {
     const known = new Set(knownRepositories);
@@ -75,17 +88,19 @@ export function buildScopeQueryPlan(
   } else if (mode === "auto") {
     for (const id of knownRepositories) {
       if (id === scope.repositoryId) continue;
-      if (repositoryAliases(id).some((alias) => mentionsAlias(query, alias))) requested.add(id);
+      if (repositoryAliases(id).some((alias) => mentionsAlias(query, alias)))
+        requested.add(id);
     }
   }
 
   const inheritedTags = globalMarker
     ? []
     : scope.ancestors.reduceRight<string[]>((tags, ancestor) => {
-      tags.push(ancestor.tag);
-      return tags;
-    }, []);
-  const includeCurrent = !globalMarker && (mode !== "workspace" || scope.kind !== "repository");
+        tags.push(ancestor.tag);
+        return tags;
+      }, []);
+  const includeCurrent =
+    !globalMarker && (mode !== "workspace" || scope.kind !== "repository");
   const tags = [
     GLOBAL_SCOPE_TAG,
     ...inheritedTags,

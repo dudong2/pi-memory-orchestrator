@@ -12,11 +12,18 @@ import {
 } from "./config.js";
 import { HindsightClient, type RecallMemory } from "./hindsight/client.js";
 import { RetainOutbox } from "./hindsight/outbox.js";
-import { ScopedHindsightProvider, type RecallOutcome } from "./hindsight/provider.js";
+import {
+  ScopedHindsightProvider,
+  type RecallOutcome,
+} from "./hindsight/provider.js";
 import { registerLongMemoryTool } from "./hindsight/tools.js";
 import { enqueueProjectMemoryMirror } from "./mirror.js";
 import { rebuildMarkersFromScopeIndex } from "./scope/marker.js";
-import { resolveScope, ScopeBoundaryError, type ResolvedScope } from "./scope/resolver.js";
+import {
+  resolveScope,
+  ScopeBoundaryError,
+  type ResolvedScope,
+} from "./scope/resolver.js";
 
 export interface ExtensionDependencies {
   config?: OrchestratorConfig;
@@ -28,7 +35,10 @@ export interface ExtensionDependencies {
 type PendingRecall = {
   prompt: string;
   cwd: string;
-  promise: Promise<{ scope: ResolvedScope | null; outcome: RecallOutcome | null }>;
+  promise: Promise<{
+    scope: ResolvedScope | null;
+    outcome: RecallOutcome | null;
+  }>;
 };
 
 type Textish = { text?: unknown; content?: unknown; timestamp?: unknown };
@@ -40,16 +50,27 @@ function extractText(value: unknown): string {
   if (typeof message.text === "string") return message.text.trim();
   if (typeof message.content === "string") return message.content.trim();
   if (!Array.isArray(message.content)) return "";
-  return message.content.flatMap((part) => {
-    if (typeof part === "string") return [part];
-    if (part && typeof part === "object" && "text" in part && typeof part.text === "string") return [part.text];
-    return [];
-  }).join("\n").trim();
+  return message.content
+    .flatMap((part) => {
+      if (typeof part === "string") return [part];
+      if (
+        part &&
+        typeof part === "object" &&
+        "text" in part &&
+        typeof part.text === "string"
+      )
+        return [part.text];
+      return [];
+    })
+    .join("\n")
+    .trim();
 }
 
 function messageTimestamp(value: unknown, fallback: number): string {
-  if (typeof value === "number" && Number.isFinite(value)) return new Date(value).toISOString();
-  if (typeof value === "string" && !Number.isNaN(Date.parse(value))) return new Date(value).toISOString();
+  if (typeof value === "number" && Number.isFinite(value))
+    return new Date(value).toISOString();
+  if (typeof value === "string" && !Number.isNaN(Date.parse(value)))
+    return new Date(value).toISOString();
   return new Date(fallback).toISOString();
 }
 
@@ -64,7 +85,10 @@ function sanitizeMemoryText(value: string): string {
     .trim();
 }
 
-function formatMemoryContext(memories: RecallMemory[], existingPrompt: string): string {
+function formatMemoryContext(
+  memories: RecallMemory[],
+  existingPrompt: string,
+): string {
   const prompt = normalizeForDuplicateCheck(existingPrompt);
   const visible = memories.flatMap((memory) => {
     const text = sanitizeMemoryText(memory.text);
@@ -91,10 +115,14 @@ function describeScope(scope: ResolvedScope | null): string {
     }, [])
     .concat(scope.marker.displayName)
     .join(" / ");
-  return scope.repositoryId ? `${hierarchy} (${scope.repositoryId})` : hierarchy;
+  return scope.repositoryId
+    ? `${hierarchy} (${scope.repositoryId})`
+    : hierarchy;
 }
 
-export function createMemoryOrchestratorExtension(dependencies: ExtensionDependencies = {}) {
+export function createMemoryOrchestratorExtension(
+  dependencies: ExtensionDependencies = {},
+) {
   return function memoryOrchestrator(pi: ExtensionAPI): void {
     const config = dependencies.config ?? loadConfig();
     const connection = resolveHindsightConnection(config);
@@ -107,19 +135,23 @@ export function createMemoryOrchestratorExtension(dependencies: ExtensionDepende
       rootDir: join(config.dataDir, "outbox"),
       operationTimeoutMs: config.requestTimeoutMs,
     });
-    const provider = dependencies.provider ?? new ScopedHindsightProvider(config, client, outbox);
-    const scopeResolver = dependencies.scopeResolver ?? (async (cwd: string) => {
-      try {
-        return await resolveScope(cwd, {
-          markerName: config.markerName,
-          dataDir: config.dataDir,
-          startCwd: cwd,
-        });
-      } catch (error) {
-        if (error instanceof ScopeBoundaryError) return null;
-        throw error;
-      }
-    });
+    const provider =
+      dependencies.provider ??
+      new ScopedHindsightProvider(config, client, outbox);
+    const scopeResolver =
+      dependencies.scopeResolver ??
+      (async (cwd: string) => {
+        try {
+          return await resolveScope(cwd, {
+            markerName: config.markerName,
+            dataDir: config.dataDir,
+            startCwd: cwd,
+          });
+        } catch (error) {
+          if (error instanceof ScopeBoundaryError) return null;
+          throw error;
+        }
+      });
     const clock = dependencies.clock ?? Date.now;
 
     let currentScope: ResolvedScope | null = null;
@@ -139,13 +171,19 @@ export function createMemoryOrchestratorExtension(dependencies: ExtensionDepende
       return currentScope;
     };
 
-    const startRecall = (prompt: string, cwd: string, signal?: AbortSignal): PendingRecall => {
+    const startRecall = (
+      prompt: string,
+      cwd: string,
+      signal?: AbortSignal,
+    ): PendingRecall => {
       const recall: PendingRecall = {
         prompt,
         cwd,
         promise: ensureScope(cwd).then(async (scope) => ({
           scope,
-          outcome: scope ? await provider.recall(prompt, scope, { signal }) : null,
+          outcome: scope
+            ? await provider.recall(prompt, scope, { signal })
+            : null,
         })),
       };
       pendingRecall = recall;
@@ -156,19 +194,25 @@ export function createMemoryOrchestratorExtension(dependencies: ExtensionDepende
       if (activeDrain) return;
       const controller = new AbortController();
       activeDrainController = controller;
-      activeDrain = provider.drain(controller.signal, 10)
+      activeDrain = provider
+        .drain(controller.signal, 10)
         .then(() => undefined)
         .catch((error: unknown) => {
-          ctx?.ui.notify(`Long-term memory sync deferred: ${error instanceof Error ? error.message : String(error)}`, "warning");
+          ctx?.ui.notify(
+            `Long-term memory sync deferred: ${error instanceof Error ? error.message : String(error)}`,
+            "warning",
+          );
         })
         .finally(() => {
-          if (activeDrainController === controller) activeDrainController = null;
+          if (activeDrainController === controller)
+            activeDrainController = null;
           activeDrain = null;
         });
     };
 
     pi.registerCommand("memory-orchestrator-status", {
-      description: "Show scoped memory mode, bank, scope, and durable outbox state.",
+      description:
+        "Show scoped memory mode, bank, scope, and durable outbox state.",
       handler: async (_args, ctx) => {
         const scope = await ensureScope(ctx.cwd);
         const counts = await provider.counts();
@@ -179,14 +223,19 @@ export function createMemoryOrchestratorExtension(dependencies: ExtensionDepende
       },
     });
 
-    const unavailableScopeMessage = "Long-term project memory scope could not be resolved from this filesystem location.";
+    const unavailableScopeMessage =
+      "Long-term project memory scope could not be resolved from this filesystem location.";
 
     pi.registerCommand("memory-orchestrator-recall", {
-      description: "Run a scoped Hindsight recall without enabling automatic context injection.",
+      description:
+        "Run a scoped Hindsight recall without enabling automatic context injection.",
       handler: async (args, ctx) => {
         const query = args.trim();
         if (!query) {
-          ctx.ui.notify("Usage: /memory-orchestrator-recall <query>", "warning");
+          ctx.ui.notify(
+            "Usage: /memory-orchestrator-recall <query>",
+            "warning",
+          );
           return;
         }
         const scope = await ensureScope(ctx.cwd);
@@ -200,20 +249,28 @@ export function createMemoryOrchestratorExtension(dependencies: ExtensionDepende
           return;
         }
         const text = outcome.memories.length
-          ? outcome.memories.map((memory, index) => `${index + 1}. ${memory.text}`).join("\n\n")
+          ? outcome.memories
+              .map((memory, index) => `${index + 1}. ${memory.text}`)
+              .join("\n\n")
           : "No relevant memories found.";
         ctx.ui.notify(text, "info");
       },
     });
 
     pi.registerCommand("memory-orchestrator-retain", {
-      description: "Store an explicit scoped memory; prefix with 'workspace ' to use workspace scope.",
+      description:
+        "Store an explicit scoped memory; prefix with 'workspace ' to use workspace scope.",
       handler: async (args, ctx) => {
         const trimmed = args.trim();
         const workspace = trimmed.startsWith("workspace ");
-        const content = workspace ? trimmed.slice("workspace ".length).trim() : trimmed;
+        const content = workspace
+          ? trimmed.slice("workspace ".length).trim()
+          : trimmed;
         if (!content) {
-          ctx.ui.notify("Usage: /memory-orchestrator-retain [workspace] <content>", "warning");
+          ctx.ui.notify(
+            "Usage: /memory-orchestrator-retain [workspace] <content>",
+            "warning",
+          );
           return;
         }
         const scope = await ensureScope(ctx.cwd);
@@ -227,12 +284,16 @@ export function createMemoryOrchestratorExtension(dependencies: ExtensionDepende
           target: workspace ? "workspace" : "current",
         });
         const result = await provider.drain(ctx.signal, 1);
-        ctx.ui.notify(`Long-term memory retain: ${JSON.stringify(result)}`, result.completed === 1 ? "info" : "warning");
+        ctx.ui.notify(
+          `Long-term memory retain: ${JSON.stringify(result)}`,
+          result.completed === 1 ? "info" : "warning",
+        );
       },
     });
 
     pi.registerCommand("memory-orchestrator-pages", {
-      description: "Ensure scope-filtered Hindsight Knowledge Page views exist.",
+      description:
+        "Ensure scope-filtered Hindsight Knowledge Page views exist.",
       handler: async (_args, ctx) => {
         const scope = await ensureScope(ctx.cwd);
         if (!scope) {
@@ -248,15 +309,22 @@ export function createMemoryOrchestratorExtension(dependencies: ExtensionDepende
       description: "Retry durable long-term memory writes now.",
       handler: async (_args, ctx) => {
         const result = await provider.drain(undefined, 100);
-        ctx.ui.notify(`Memory outbox: ${JSON.stringify(result)}`, result.failed ? "warning" : "info");
+        ctx.ui.notify(
+          `Memory outbox: ${JSON.stringify(result)}`,
+          result.failed ? "warning" : "info",
+        );
       },
     });
 
     pi.registerCommand("memory-orchestrator-rebuild-markers", {
-      description: "Restore missing scope markers from the central scope index.",
+      description:
+        "Restore missing scope markers from the central scope index.",
       handler: async (args, ctx) => {
         const root = args.trim() || ctx.cwd;
-        const result = await rebuildMarkersFromScopeIndex(join(config.dataDir, "scope-index.json"), { root });
+        const result = await rebuildMarkersFromScopeIndex(
+          join(config.dataDir, "scope-index.json"),
+          { root },
+        );
         ctx.ui.notify(`Marker recovery: ${JSON.stringify(result)}`, "info");
       },
     });
@@ -283,23 +351,28 @@ export function createMemoryOrchestratorExtension(dependencies: ExtensionDepende
         return;
       }
       void provider.ensureKnowledgeViews(scope).catch((error: unknown) => {
-        ctx.ui.notify(`Knowledge view refresh deferred: ${error instanceof Error ? error.message : String(error)}`, "warning");
+        ctx.ui.notify(
+          `Knowledge view refresh deferred: ${error instanceof Error ? error.message : String(error)}`,
+          "warning",
+        );
       });
     });
 
     pi.on("input", (event: InputEvent, ctx) => {
       if (event.source === "extension") return;
       latestUserInput = event.text.trim();
-      if (config.mode === "active" && latestUserInput) startRecall(latestUserInput, ctx.cwd, ctx.signal);
+      if (config.mode === "active" && latestUserInput)
+        startRecall(latestUserInput, ctx.cwd, ctx.signal);
     });
 
     pi.on("before_agent_start", async (event, ctx) => {
       if (config.mode !== "active") return;
       const prompt = event.prompt.trim();
       if (!prompt) return;
-      const recall = pendingRecall?.prompt === prompt && pendingRecall.cwd === ctx.cwd
-        ? pendingRecall
-        : startRecall(prompt, ctx.cwd, ctx.signal);
+      const recall =
+        pendingRecall?.prompt === prompt && pendingRecall.cwd === ctx.cwd
+          ? pendingRecall
+          : startRecall(prompt, ctx.cwd, ctx.signal);
       const { outcome } = await recall.promise;
       if (!outcome || outcome.error || !outcome.memories.length) return;
       const block = formatMemoryContext(outcome.memories, event.systemPrompt);
@@ -310,7 +383,8 @@ export function createMemoryOrchestratorExtension(dependencies: ExtensionDepende
     pi.on("tool_result", async (event, ctx) => {
       try {
         const scope = await ensureScope(ctx.cwd);
-        if (scope && await enqueueProjectMemoryMirror(event, provider, scope)) scheduleDrain(ctx);
+        if (scope && (await enqueueProjectMemoryMirror(event, provider, scope)))
+          scheduleDrain(ctx);
       } catch (error) {
         ctx.ui.notify(
           `Project memory mirror deferred: ${error instanceof Error ? error.message : String(error)}`,
@@ -329,12 +403,17 @@ export function createMemoryOrchestratorExtension(dependencies: ExtensionDepende
       const rawTimestamp = (event.message as Textish).timestamp;
       const timestamp = messageTimestamp(rawTimestamp, clock());
       turnCounter++;
-      await provider.enqueueTurn(scope, {
-        sessionId,
-        turnId: `${turnCounter}-${timestamp}`,
-        harness: config.harness,
-        timestamp,
-      }, user, assistant);
+      await provider.enqueueTurn(
+        scope,
+        {
+          sessionId,
+          turnId: `${turnCounter}-${timestamp}`,
+          harness: config.harness,
+          timestamp,
+        },
+        user,
+        assistant,
+      );
       scheduleDrain(ctx);
     });
 
@@ -343,11 +422,15 @@ export function createMemoryOrchestratorExtension(dependencies: ExtensionDepende
         const drain = activeDrain;
         let completed = false;
         await Promise.race([
-          drain.then(() => { completed = true; }),
+          drain.then(() => {
+            completed = true;
+          }),
           new Promise<void>((resolve) => setTimeout(resolve, 5_000)),
         ]);
         if (!completed) {
-          activeDrainController?.abort(new Error("session shutdown drain deadline"));
+          activeDrainController?.abort(
+            new Error("session shutdown drain deadline"),
+          );
           await drain;
         }
       }

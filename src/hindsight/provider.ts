@@ -1,7 +1,16 @@
 import type { OrchestratorConfig } from "../config.js";
-import { buildScopeQueryPlan, GLOBAL_SCOPE_TAG, type ScopeQueryOptions, type ScopeQueryPlan } from "../scope/query.js";
+import {
+  buildScopeQueryPlan,
+  GLOBAL_SCOPE_TAG,
+  type ScopeQueryOptions,
+  type ScopeQueryPlan,
+} from "../scope/query.js";
 import type { ResolvedScope } from "../scope/resolver.js";
-import { HindsightClient, type RecallMemory, type UpdateMemoryRequest } from "./client.js";
+import {
+  HindsightClient,
+  type RecallMemory,
+  type UpdateMemoryRequest,
+} from "./client.js";
 import { ensureKnowledgeViews, type KnowledgeViewResult } from "./knowledge.js";
 import { RetainOutbox } from "./outbox.js";
 
@@ -24,7 +33,10 @@ function currentScopeTag(scope: ResolvedScope): string {
 
 function workspaceScopeTag(scope: ResolvedScope): string {
   if (scope.kind !== "repository") return scope.scopeTag;
-  return scope.ancestors.find((ancestor) => ancestor.kind === "workspace")?.tag ?? scope.scopeTag;
+  return (
+    scope.ancestors.find((ancestor) => ancestor.kind === "workspace")?.tag ??
+    scope.scopeTag
+  );
 }
 
 export class ScopedHindsightProvider {
@@ -32,14 +44,20 @@ export class ScopedHindsightProvider {
   readonly #client: HindsightClient;
   readonly #outbox: RetainOutbox;
 
-  constructor(config: OrchestratorConfig, client: HindsightClient, outbox: RetainOutbox) {
+  constructor(
+    config: OrchestratorConfig,
+    client: HindsightClient,
+    outbox: RetainOutbox,
+  ) {
     this.#config = config;
     this.#client = client;
     this.#outbox = outbox;
   }
 
   bankId(): string {
-    return this.#config.mode === "shadow" ? this.#config.shadowBankId : this.#config.bankId;
+    return this.#config.mode === "shadow"
+      ? this.#config.shadowBankId
+      : this.#config.bankId;
   }
 
   async recall(
@@ -49,14 +67,18 @@ export class ScopedHindsightProvider {
   ): Promise<RecallOutcome> {
     const plan = buildScopeQueryPlan(scope, query, options);
     try {
-      const response = await this.#client.recall(this.bankId(), {
-        query,
-        budget: "mid",
-        max_tokens: this.#config.maxRecallTokens,
-        types: this.#config.recallTypes,
-        prefer_observations: this.#config.preferObservations,
-        tag_groups: plan.tagGroups,
-      }, options.signal);
+      const response = await this.#client.recall(
+        this.bankId(),
+        {
+          query,
+          budget: "mid",
+          max_tokens: this.#config.maxRecallTokens,
+          types: this.#config.recallTypes,
+          prefer_observations: this.#config.preferObservations,
+          tag_groups: plan.tagGroups,
+        },
+        options.signal,
+      );
       return { memories: response.results, plan };
     } catch (error) {
       return {
@@ -81,7 +103,11 @@ export class ScopedHindsightProvider {
       item: {
         content: JSON.stringify([
           { role: "user", content: user, timestamp: identity.timestamp },
-          { role: "assistant", content: assistant, timestamp: identity.timestamp },
+          {
+            role: "assistant",
+            content: assistant,
+            timestamp: identity.timestamp,
+          },
         ]),
         timestamp: identity.timestamp,
         context: "conversation between a coding agent and the user",
@@ -103,9 +129,17 @@ export class ScopedHindsightProvider {
 
   async enqueueExplicit(
     scope: ResolvedScope,
-    input: { identity: string; content: string; target: "current" | "workspace"; timestamp?: string },
+    input: {
+      identity: string;
+      content: string;
+      target: "current" | "workspace";
+      timestamp?: string;
+    },
   ): Promise<void> {
-    const scopeTag = input.target === "workspace" ? workspaceScopeTag(scope) : currentScopeTag(scope);
+    const scopeTag =
+      input.target === "workspace"
+        ? workspaceScopeTag(scope)
+        : currentScopeTag(scope);
     const timestamp = input.timestamp ?? new Date().toISOString();
     await this.#outbox.enqueue({
       identity: input.identity,
@@ -128,15 +162,25 @@ export class ScopedHindsightProvider {
     });
   }
 
-  async updateMemory(memoryId: string, request: UpdateMemoryRequest, signal?: AbortSignal): Promise<Record<string, unknown>> {
+  async updateMemory(
+    memoryId: string,
+    request: UpdateMemoryRequest,
+    signal?: AbortSignal,
+  ): Promise<Record<string, unknown>> {
     return this.#client.updateMemory(this.bankId(), memoryId, request, signal);
   }
 
-  ensureKnowledgeViews(scope: ResolvedScope, signal?: AbortSignal): Promise<KnowledgeViewResult> {
+  ensureKnowledgeViews(
+    scope: ResolvedScope,
+    signal?: AbortSignal,
+  ): Promise<KnowledgeViewResult> {
     return ensureKnowledgeViews(this.#client, this.bankId(), scope, signal);
   }
 
-  async drain(signal?: AbortSignal, maxJobs?: number): Promise<{ completed: number; deferred: number; failed: number }> {
+  async drain(
+    signal?: AbortSignal,
+    maxJobs?: number,
+  ): Promise<{ completed: number; deferred: number; failed: number }> {
     return this.#outbox.drain(this.#client, { signal, maxJobs });
   }
 
