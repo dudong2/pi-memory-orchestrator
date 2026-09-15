@@ -1,12 +1,13 @@
 import { mkdir, open, readFile, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { DEFAULT_CONFIG } from "../config.js";
 import { GLOBAL_SCOPE_TAG } from "./query.js";
 import { resolveGitContext, type GitContext } from "./git.js";
 import {
   DEFAULT_MARKER_NAME,
   ensureMarker,
+  mutateWorkspaceMarker,
   pathWorkspaceId,
   readWorkspaceMarker,
   registerRepository,
@@ -237,6 +238,13 @@ export async function resolveScope(
     workspaceRoot,
     generatedWorkspaceId,
   );
+  const displayName = basename(workspaceRoot) || "workspace";
+  if (marker.displayName !== displayName) {
+    marker = await mutateWorkspaceMarker(markerPath, (current) => {
+      if (!current) throw new Error(`workspace marker does not exist: ${markerPath}`);
+      return { ...current, displayName, updatedAt: new Date().toISOString() };
+    });
+  }
   if (git) {
     marker = await registerRepository(markerPath, git.repositoryId);
     await excludeLocalMarker(git, markerPath, markerName);

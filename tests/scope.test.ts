@@ -239,6 +239,7 @@ test("a marker preserves identity across a directory move while hierarchy is rec
   await rename(original, moved);
   const second = await resolveScope(moved, { dataDir });
   assert.equal(second.marker.workspaceId, first.marker.workspaceId);
+  assert.equal(second.marker.displayName, "renamed");
   assert.deepEqual(
     first.ancestors.map((layer) => layer.marker.workspaceId),
     [firstAncestor.marker.workspaceId],
