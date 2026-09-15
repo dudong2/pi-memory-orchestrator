@@ -8,6 +8,7 @@ import {
   ensureMarker,
   findIndexedMarker,
   findNearestMarker,
+  pathWorkspaceId,
   readWorkspaceMarker,
   registerRepository,
   updateScopeIndex,
@@ -101,7 +102,8 @@ export async function resolveScope(cwd: string, options: ResolveScopeOptions = {
   if (isForbiddenWorkspaceRoot(workspaceRoot, home)) throw new ScopeBoundaryError(workspaceRoot);
   markerPath ??= join(workspaceRoot, markerName);
 
-  let marker = await ensureMarker(markerPath, workspaceRoot);
+  const generatedWorkspaceId = git ? undefined : pathWorkspaceId(workspaceRoot, home);
+  let marker = await ensureMarker(markerPath, workspaceRoot, generatedWorkspaceId);
   if (git) {
     marker = await registerRepository(markerPath, git.repositoryId);
     await excludeLocalMarker(git, markerPath, markerName);

@@ -13,9 +13,9 @@ The active shared bank is `coding-agent::dudong2`. Former `user-knowledge` and p
 
 ## Scope
 
-The nearest local-only `.pi-memory-scope.json` file gives a logical workspace a stable UUID. Child Git repositories inherit it; canonical Git remotes identify repository scopes. The marker contains identity metadata only, never memory or secrets. A marker may set `"scope": "global"`; turns retained below that marker use the reserved `scope:global` tag and are visible from every resolved workspace.
+The nearest local-only `.pi-memory-scope.json` file gives a logical workspace a stable identity. Child Git repositories inherit it; canonical Git remotes identify repository scopes. The marker contains identity metadata only, never memory or secrets. A marker may set `"scope": "global"`; turns retained below that marker use the reserved `scope:global` tag and are visible from every resolved workspace.
 
-`$HOME` and the filesystem root are hard scope boundaries: their markers are neither discovered nor created. A session launched exactly at `$HOME` keeps bounded `pi-hermes-memory` available but disables project-scoped Hindsight recall and retention. When no allowed ancestor marker exists, a Git session creates one at the repository root and a non-Git session creates one at its starting directory.
+`$HOME` and the filesystem root are hard scope boundaries: their markers are neither discovered nor created. A session launched exactly at `$HOME` keeps bounded `pi-hermes-memory` available but disables project-scoped Hindsight recall and retention. When no allowed ancestor marker exists, a Git session creates one at the repository root. A non-Git session creates one at its starting directory with a deterministic `path:<sha256>` workspace ID. Paths below `$HOME` are hashed as normalized home-relative paths, so the ID survives an operating-system username change when the relative directory layout stays the same; paths outside `$HOME` use their normalized absolute path.
 
 Normal recall sends one native Hindsight compound filter for:
 

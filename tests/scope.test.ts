@@ -7,6 +7,7 @@ import test from "node:test";
 import { canonicalizeGitRemote, resolveGitContext } from "../src/scope/git.js";
 import {
   ensureMarker,
+  pathWorkspaceId,
   readWorkspaceMarker,
   registerRepository,
   removeWorkspaceFromScopeIndex,
@@ -38,6 +39,32 @@ test("non-Git cwd creates and reuses a local workspace marker", async () => {
   assert.equal(second.marker.workspaceId, first.marker.workspaceId);
   assert.equal(second.markerPath, first.markerPath);
   assert.equal(second.repositoryId, undefined);
+});
+
+test("non-Git workspace IDs survive a HOME username change", async () => {
+  const machine = await tempRoot("memory-scope-portable-");
+  const firstHome = join(machine, "Users", "dudong2");
+  const secondHome = join(machine, "Users", "newname");
+  const relativeWorkspace = join("workspace", "notes");
+  const firstRoot = join(firstHome, relativeWorkspace);
+  const secondRoot = join(secondHome, relativeWorkspace);
+  await mkdir(firstRoot, { recursive: true });
+  await mkdir(secondRoot, { recursive: true });
+
+  const first = await resolveScope(firstRoot, {
+    dataDir: join(machine, "first-state"),
+    homeDir: firstHome,
+    startCwd: firstRoot,
+  });
+  const second = await resolveScope(secondRoot, {
+    dataDir: join(machine, "second-state"),
+    homeDir: secondHome,
+    startCwd: secondRoot,
+  });
+
+  assert.match(first.marker.workspaceId, /^path:[0-9a-f]{64}$/);
+  assert.equal(second.marker.workspaceId, first.marker.workspaceId);
+  assert.equal(first.marker.workspaceId, pathWorkspaceId(firstRoot, firstHome));
 });
 
 test("a HOME marker and stale HOME scope-index entry do not capture a Git repository", async () => {

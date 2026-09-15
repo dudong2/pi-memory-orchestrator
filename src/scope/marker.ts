@@ -1,6 +1,6 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdir, open, readFile, realpath, rename, stat, unlink, writeFile } from "node:fs/promises";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 export const WORKSPACE_MARKER_VERSION = 1 as const;
 export const DEFAULT_MARKER_NAME = ".pi-memory-scope.json";
@@ -32,8 +32,11 @@ export function parseWorkspaceMarker(input: unknown): WorkspaceMarker {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("workspace marker must be an object");
   const raw = input as Partial<WorkspaceMarker>;
   if (raw.version !== WORKSPACE_MARKER_VERSION) throw new Error(`unsupported workspace marker version: ${String(raw.version)}`);
-  if (typeof raw.workspaceId !== "string" || !/^ws_[0-9a-f-]{36}$/i.test(raw.workspaceId)) {
-    throw new Error("workspaceId must be a ws_-prefixed UUID");
+  if (
+    typeof raw.workspaceId !== "string"
+    || (!/^ws_[0-9a-f-]{36}$/i.test(raw.workspaceId) && !/^path:[0-9a-f]{64}$/.test(raw.workspaceId))
+  ) {
+    throw new Error("workspaceId must be a ws_-prefixed UUID or path:<sha256>");
   }
   if (typeof raw.displayName !== "string" || !raw.displayName.trim()) throw new Error("displayName is required");
   if (raw.scope !== undefined && raw.scope !== "workspace" && raw.scope !== "global") {
@@ -85,11 +88,32 @@ export async function findNearestMarker(
   }
 }
 
-export function createWorkspaceMarker(root: string, now = new Date()): WorkspaceMarker {
+function portablePath(path: string): string {
+  return path.split(sep).join("/").normalize("NFC");
+}
+
+export function pathWorkspaceId(root: string, home: string): string {
+  const absoluteRoot = resolve(root);
+  const absoluteHome = resolve(home);
+  const relativeRoot = relative(absoluteHome, absoluteRoot);
+  const isHomeRelative = !isAbsolute(relativeRoot)
+    && relativeRoot !== ".."
+    && !relativeRoot.startsWith(`..${sep}`);
+  const identity = isHomeRelative
+    ? `home:${portablePath(relativeRoot || ".")}`
+    : `absolute:${portablePath(absoluteRoot)}`;
+  return `path:${createHash("sha256").update(identity).digest("hex")}`;
+}
+
+export function createWorkspaceMarker(
+  root: string,
+  now = new Date(),
+  workspaceId = `ws_${randomUUID()}`,
+): WorkspaceMarker {
   const timestamp = now.toISOString();
   return {
     version: WORKSPACE_MARKER_VERSION,
-    workspaceId: `ws_${randomUUID()}`,
+    workspaceId,
     displayName: basename(resolve(root)) || "workspace",
     repositories: [],
     createdAt: timestamp,
@@ -153,8 +177,12 @@ export async function mutateWorkspaceMarker(
   }
 }
 
-export async function ensureMarker(markerPath: string, root: string): Promise<WorkspaceMarker> {
-  return mutateWorkspaceMarker(markerPath, (current) => current ?? createWorkspaceMarker(root));
+export async function ensureMarker(
+  markerPath: string,
+  root: string,
+  workspaceId?: string,
+): Promise<WorkspaceMarker> {
+  return mutateWorkspaceMarker(markerPath, (current) => current ?? createWorkspaceMarker(root, new Date(), workspaceId));
 }
 
 export async function registerRepository(markerPath: string, repositoryId: string): Promise<WorkspaceMarker> {
