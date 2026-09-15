@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtemp, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
+import {
+  mkdtemp,
+  mkdir,
+  readFile,
+  realpath,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
@@ -24,8 +30,14 @@ function git(cwd: string, ...args: string[]): string {
 }
 
 test("canonicalizeGitRemote normalizes SSH and HTTPS remotes", () => {
-  assert.equal(canonicalizeGitRemote("git@github.com:Dudong2/LuckyCat.git"), "github.com/dudong2/luckycat");
-  assert.equal(canonicalizeGitRemote("https://GitHub.com/Dudong2/LuckyCat.git"), "github.com/dudong2/luckycat");
+  assert.equal(
+    canonicalizeGitRemote("git@github.com:Dudong2/LuckyCat.git"),
+    "github.com/dudong2/luckycat",
+  );
+  assert.equal(
+    canonicalizeGitRemote("https://GitHub.com/Dudong2/LuckyCat.git"),
+    "github.com/dudong2/luckycat",
+  );
   assert.equal(canonicalizeGitRemote("file:///tmp/repo"), undefined);
 });
 
@@ -75,13 +87,32 @@ test("a HOME marker and stale HOME scope-index entry do not capture a Git reposi
   const repository = join(home, "workspace", "repository");
   await mkdir(repository, { recursive: true });
   git(repository, "init", "-q");
-  git(repository, "remote", "add", "origin", "git@github.com:dudong2/home-boundary.git");
-  await updateScopeIndex(join(dataDir, "scope-index.json"), homeMarkerPath, homeMarker, repository);
+  git(
+    repository,
+    "remote",
+    "add",
+    "origin",
+    "git@github.com:dudong2/home-boundary.git",
+  );
+  await updateScopeIndex(
+    join(dataDir, "scope-index.json"),
+    homeMarkerPath,
+    homeMarker,
+    repository,
+  );
 
-  const scope = await resolveScope(repository, { dataDir, homeDir: home } as Parameters<typeof resolveScope>[1]);
-  assert.equal(await realpath(dirname(scope.markerPath)), await realpath(repository));
+  const scope = await resolveScope(repository, {
+    dataDir,
+    homeDir: home,
+  } as Parameters<typeof resolveScope>[1]);
+  assert.equal(
+    await realpath(dirname(scope.markerPath)),
+    await realpath(repository),
+  );
   assert.notEqual(scope.marker.workspaceId, homeMarker.workspaceId);
-  assert.deepEqual(scope.marker.repositories, ["github.com/dudong2/home-boundary"]);
+  assert.deepEqual(scope.marker.repositories, [
+    "github.com/dudong2/home-boundary",
+  ]);
 });
 
 test("HOME itself cannot become a filesystem workspace", async () => {
@@ -89,7 +120,9 @@ test("HOME itself cannot become a filesystem workspace", async () => {
   const dataDir = join(home, "state");
 
   await assert.rejects(
-    resolveScope(home, { dataDir, homeDir: home } as Parameters<typeof resolveScope>[1]),
+    resolveScope(home, { dataDir, homeDir: home } as Parameters<
+      typeof resolveScope
+    >[1]),
     /home directory cannot be used as a memory workspace/i,
   );
   await assert.rejects(readFile(join(home, ".pi-memory-scope.json")));
@@ -101,7 +134,9 @@ test("Git scope uses canonical remote and excludes the local marker", async () =
   git(root, "remote", "add", "origin", "git@github.com:Dudong2/Scope-Test.git");
   const scope = await resolveScope(root, { dataDir: join(root, "state") });
   assert.equal(scope.repositoryId, "github.com/dudong2/scope-test");
-  assert.deepEqual(scope.marker.repositories, ["github.com/dudong2/scope-test"]);
+  assert.deepEqual(scope.marker.repositories, [
+    "github.com/dudong2/scope-test",
+  ]);
   const exclude = await readFile(join(root, ".git", "info", "exclude"), "utf8");
   assert.match(exclude, /^\/\.pi-memory-scope\.json$/m);
 });
@@ -109,15 +144,18 @@ test("Git scope uses canonical remote and excludes the local marker", async () =
 test("a global marker is parsed and inherited by nested folders", async () => {
   const root = await tempRoot("memory-scope-global-");
   const markerPath = join(root, ".pi-memory-scope.json");
-  await writeFile(markerPath, JSON.stringify({
-    version: 1,
-    workspaceId: "ws_11111111-1111-4111-8111-111111111111",
-    displayName: "scratchpad",
-    scope: "global",
-    repositories: [],
-    createdAt: "2026-09-14T00:00:00.000Z",
-    updatedAt: "2026-09-14T00:00:00.000Z",
-  }));
+  await writeFile(
+    markerPath,
+    JSON.stringify({
+      version: 1,
+      workspaceId: "ws_11111111-1111-4111-8111-111111111111",
+      displayName: "scratchpad",
+      scope: "global",
+      repositories: [],
+      createdAt: "2026-09-14T00:00:00.000Z",
+      updatedAt: "2026-09-14T00:00:00.000Z",
+    }),
+  );
   const child = join(root, "nested");
   await mkdir(child);
 
@@ -133,7 +171,13 @@ test("child repositories inherit their nearest parent marker", async () => {
   const child = join(root, "frontend");
   await mkdir(child);
   git(child, "init", "-q");
-  git(child, "remote", "add", "origin", "https://github.com/dudong2/frontend.git");
+  git(
+    child,
+    "remote",
+    "add",
+    "origin",
+    "https://github.com/dudong2/frontend.git",
+  );
   const nested = await resolveScope(child, { dataDir });
   assert.equal(nested.marker.workspaceId, parent.marker.workspaceId);
   assert.equal(nested.markerPath, parent.markerPath);
@@ -143,8 +187,13 @@ test("child repositories inherit their nearest parent marker", async () => {
 test("concurrent repository registration loses no updates", async () => {
   const root = await tempRoot("memory-scope-concurrent-");
   const scope = await resolveScope(root, { dataDir: join(root, "state") });
-  const repositories = Array.from({ length: 20 }, (_, index) => `github.com/dudong2/repo-${index}`);
-  await Promise.all(repositories.map((repo) => registerRepository(scope.markerPath, repo)));
+  const repositories = Array.from(
+    { length: 20 },
+    (_, index) => `github.com/dudong2/repo-${index}`,
+  );
+  await Promise.all(
+    repositories.map((repo) => registerRepository(scope.markerPath, repo)),
+  );
   const marker = await readWorkspaceMarker(scope.markerPath);
   assert.deepEqual(marker.repositories, [...repositories].sort());
 });
@@ -157,7 +206,12 @@ test("a scope-index path alias reconnects a moved temp workspace", async () => {
   await mkdir(original);
   await mkdir(moved);
   const first = await resolveScope(original, { dataDir });
-  await updateScopeIndex(join(dataDir, "scope-index.json"), first.markerPath, first.marker, moved);
+  await updateScopeIndex(
+    join(dataDir, "scope-index.json"),
+    first.markerPath,
+    first.marker,
+    moved,
+  );
   const second = await resolveScope(moved, { dataDir });
   assert.equal(second.marker.workspaceId, first.marker.workspaceId);
   assert.equal(second.markerPath, first.markerPath);
@@ -170,9 +224,17 @@ test("scope-index cleanup removes only the selected workspace", async () => {
   const second = await resolveScope(join(root, "second"), { dataDir });
   const indexPath = join(dataDir, "scope-index.json");
 
-  assert.equal(await removeWorkspaceFromScopeIndex(indexPath, first.marker.workspaceId), true);
-  assert.equal(await removeWorkspaceFromScopeIndex(indexPath, first.marker.workspaceId), false);
-  const index = JSON.parse(await readFile(indexPath, "utf8")) as { workspaces: Record<string, unknown> };
+  assert.equal(
+    await removeWorkspaceFromScopeIndex(indexPath, first.marker.workspaceId),
+    true,
+  );
+  assert.equal(
+    await removeWorkspaceFromScopeIndex(indexPath, first.marker.workspaceId),
+    false,
+  );
+  const index = JSON.parse(await readFile(indexPath, "utf8")) as {
+    workspaces: Record<string, unknown>;
+  };
   assert.equal(index.workspaces[first.marker.workspaceId], undefined);
   assert.ok(index.workspaces[second.marker.workspaceId]);
 });
@@ -185,15 +247,26 @@ test("linked worktree resolves the main repository identity", async () => {
   git(main, "init", "-q");
   git(main, "config", "user.email", "test@example.com");
   git(main, "config", "user.name", "Test");
-  git(main, "remote", "add", "origin", "git@github.com:dudong2/worktree-test.git");
+  git(
+    main,
+    "remote",
+    "add",
+    "origin",
+    "git@github.com:dudong2/worktree-test.git",
+  );
   await writeFile(join(main, "README.md"), "test\n");
   git(main, "add", "README.md");
   git(main, "commit", "-qm", "initial");
   git(main, "worktree", "add", "-q", "-b", "linked-test", linked);
 
   const mainScope = await resolveScope(main, { dataDir: join(root, "state") });
-  const linkedScope = await resolveScope(linked, { dataDir: join(root, "state") });
+  const linkedScope = await resolveScope(linked, {
+    dataDir: join(root, "state"),
+  });
   assert.equal(linkedScope.marker.workspaceId, mainScope.marker.workspaceId);
   assert.equal(linkedScope.repositoryId, mainScope.repositoryId);
-  assert.equal(resolveGitContext(linked)?.commonDir, resolveGitContext(main)?.commonDir);
+  assert.equal(
+    resolveGitContext(linked)?.commonDir,
+    resolveGitContext(main)?.commonDir,
+  );
 });

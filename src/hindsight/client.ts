@@ -29,7 +29,11 @@ export interface TagFilterLeaf {
   match: TagMatch;
 }
 
-export type TagFilterGroup = TagFilterLeaf | { and: TagFilterGroup[] } | { or: TagFilterGroup[] } | { not: TagFilterGroup };
+export type TagFilterGroup =
+  | TagFilterLeaf
+  | { and: TagFilterGroup[] }
+  | { or: TagFilterGroup[] }
+  | { not: TagFilterGroup };
 
 export interface RecallRequest {
   query: string;
@@ -130,7 +134,8 @@ export class HindsightClient {
     } catch (error) {
       throw new Error("Hindsight apiUrl must be a valid URL", { cause: error });
     }
-    if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("Hindsight apiUrl must use HTTP(S)");
+    if (url.protocol !== "http:" && url.protocol !== "https:")
+      throw new Error("Hindsight apiUrl must use HTTP(S)");
     this.#apiUrl = url.toString().replace(/\/$/, "");
     this.#apiToken = options.apiToken?.trim() || undefined;
     this.#requestTimeoutMs = options.requestTimeoutMs ?? 30_000;
@@ -141,21 +146,43 @@ export class HindsightClient {
     return this.#request("GET", "/health", undefined, signal);
   }
 
-  async retain(bankId: string, request: RetainRequest, signal?: AbortSignal): Promise<Record<string, unknown>> {
-    return this.#request("POST", `/v1/default/banks/${encodeURIComponent(bankId)}/memories`, request, signal);
+  async retain(
+    bankId: string,
+    request: RetainRequest,
+    signal?: AbortSignal,
+  ): Promise<Record<string, unknown>> {
+    return this.#request(
+      "POST",
+      `/v1/default/banks/${encodeURIComponent(bankId)}/memories`,
+      request,
+      signal,
+    );
   }
 
-  async recall(bankId: string, request: RecallRequest, signal?: AbortSignal): Promise<RecallResponse> {
+  async recall(
+    bankId: string,
+    request: RecallRequest,
+    signal?: AbortSignal,
+  ): Promise<RecallResponse> {
     const response = await this.#request<Record<string, unknown>>(
       "POST",
       `/v1/default/banks/${encodeURIComponent(bankId)}/memories/recall`,
       request,
       signal,
     );
-    return { ...response, results: Array.isArray(response.results) ? response.results as RecallMemory[] : [] };
+    return {
+      ...response,
+      results: Array.isArray(response.results)
+        ? (response.results as RecallMemory[])
+        : [],
+    };
   }
 
-  async operationStatus(bankId: string, operationId: string, signal?: AbortSignal): Promise<OperationStatus> {
+  async operationStatus(
+    bankId: string,
+    operationId: string,
+    signal?: AbortSignal,
+  ): Promise<OperationStatus> {
     const response = await this.#request<Record<string, unknown>>(
       "GET",
       `/v1/default/banks/${encodeURIComponent(bankId)}/operations/${encodeURIComponent(operationId)}`,
@@ -165,7 +192,11 @@ export class HindsightClient {
     return { ...response, status: String(response.status ?? "") };
   }
 
-  async cancelOperation(bankId: string, operationId: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
+  async cancelOperation(
+    bankId: string,
+    operationId: string,
+    signal?: AbortSignal,
+  ): Promise<Record<string, unknown>> {
     return this.#request(
       "DELETE",
       `/v1/default/banks/${encodeURIComponent(bankId)}/operations/${encodeURIComponent(operationId)}`,
@@ -182,24 +213,46 @@ export class HindsightClient {
     callerSignal?: AbortSignal,
   ): Promise<Record<string, unknown>> {
     const timeoutSignal = AbortSignal.timeout(this.#requestTimeoutMs);
-    const signal = callerSignal ? AbortSignal.any([callerSignal, timeoutSignal]) : timeoutSignal;
+    const signal = callerSignal
+      ? AbortSignal.any([callerSignal, timeoutSignal])
+      : timeoutSignal;
     const form = new FormData();
-    const bytes = archive.buffer.slice(archive.byteOffset, archive.byteOffset + archive.byteLength) as ArrayBuffer;
-    form.append("file", new Blob([bytes], { type: "application/zip" }), filename);
+    const bytes = archive.buffer.slice(
+      archive.byteOffset,
+      archive.byteOffset + archive.byteLength,
+    ) as ArrayBuffer;
+    form.append(
+      "file",
+      new Blob([bytes], { type: "application/zip" }),
+      filename,
+    );
     const headers: Record<string, string> = { Accept: "application/json" };
     if (this.#apiToken) headers.Authorization = `Bearer ${this.#apiToken}`;
     const path = `/v1/default/banks/${encodeURIComponent(bankId)}/document-transfer?on_conflict=${onConflict}`;
-    const response = await this.#fetch(`${this.#apiUrl}${path}`, { method: "POST", headers, body: form, signal });
+    const response = await this.#fetch(`${this.#apiUrl}${path}`, {
+      method: "POST",
+      headers,
+      body: form,
+      signal,
+    });
     const text = await response.text();
     let parsed: unknown = null;
     if (text) {
-      try { parsed = JSON.parse(text) as unknown; } catch { parsed = text; }
+      try {
+        parsed = JSON.parse(text) as unknown;
+      } catch {
+        parsed = text;
+      }
     }
-    if (!response.ok) throw new HindsightHttpError(response.status, "POST", path, parsed);
+    if (!response.ok)
+      throw new HindsightHttpError(response.status, "POST", path, parsed);
     return (parsed ?? {}) as Record<string, unknown>;
   }
 
-  async triggerConsolidation(bankId: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
+  async triggerConsolidation(
+    bankId: string,
+    signal?: AbortSignal,
+  ): Promise<Record<string, unknown>> {
     return this.#request(
       "POST",
       `/v1/default/banks/${encodeURIComponent(bankId)}/consolidate`,
@@ -208,14 +261,21 @@ export class HindsightClient {
     );
   }
 
-  async knowledgeTree(bankId: string, signal?: AbortSignal): Promise<KnowledgeTreeResponse> {
+  async knowledgeTree(
+    bankId: string,
+    signal?: AbortSignal,
+  ): Promise<KnowledgeTreeResponse> {
     const response = await this.#request<Record<string, unknown>>(
       "GET",
       `/v1/default/banks/${encodeURIComponent(bankId)}/knowledge-base/tree`,
       undefined,
       signal,
     );
-    return { roots: Array.isArray(response.roots) ? response.roots as KnowledgeNode[] : [] };
+    return {
+      roots: Array.isArray(response.roots)
+        ? (response.roots as KnowledgeNode[])
+        : [],
+    };
   }
 
   async createKnowledgeFolder(
@@ -265,7 +325,9 @@ export class HindsightClient {
     callerSignal?: AbortSignal,
   ): Promise<T> {
     const timeoutSignal = AbortSignal.timeout(this.#requestTimeoutMs);
-    const signal = callerSignal ? AbortSignal.any([callerSignal, timeoutSignal]) : timeoutSignal;
+    const signal = callerSignal
+      ? AbortSignal.any([callerSignal, timeoutSignal])
+      : timeoutSignal;
     const headers: Record<string, string> = { Accept: "application/json" };
     if (this.#apiToken) headers.Authorization = `Bearer ${this.#apiToken}`;
     if (body !== undefined) headers["Content-Type"] = "application/json";
@@ -279,9 +341,14 @@ export class HindsightClient {
     const text = await response.text();
     let parsed: unknown = null;
     if (text) {
-      try { parsed = JSON.parse(text) as unknown; } catch { parsed = text; }
+      try {
+        parsed = JSON.parse(text) as unknown;
+      } catch {
+        parsed = text;
+      }
     }
-    if (!response.ok) throw new HindsightHttpError(response.status, method, path, parsed);
+    if (!response.ok)
+      throw new HindsightHttpError(response.status, method, path, parsed);
     return (parsed ?? {}) as T;
   }
 }

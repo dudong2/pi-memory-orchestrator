@@ -1,6 +1,23 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, open, readFile, realpath, rename, stat, unlink, writeFile } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import {
+  mkdir,
+  open,
+  readFile,
+  realpath,
+  rename,
+  stat,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
 
 export const WORKSPACE_MARKER_VERSION = 1 as const;
 export const DEFAULT_MARKER_NAME = ".pi-memory-scope.json";
@@ -29,41 +46,69 @@ export interface ScopeIndex {
 }
 
 export function parseWorkspaceMarker(input: unknown): WorkspaceMarker {
-  if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("workspace marker must be an object");
+  if (!input || typeof input !== "object" || Array.isArray(input))
+    throw new Error("workspace marker must be an object");
   const raw = input as Partial<WorkspaceMarker>;
-  if (raw.version !== WORKSPACE_MARKER_VERSION) throw new Error(`unsupported workspace marker version: ${String(raw.version)}`);
+  if (raw.version !== WORKSPACE_MARKER_VERSION)
+    throw new Error(
+      `unsupported workspace marker version: ${String(raw.version)}`,
+    );
   if (
-    typeof raw.workspaceId !== "string"
-    || (!/^ws_[0-9a-f-]{36}$/i.test(raw.workspaceId) && !/^path:[0-9a-f]{64}$/.test(raw.workspaceId))
+    typeof raw.workspaceId !== "string" ||
+    (!/^ws_[0-9a-f-]{36}$/i.test(raw.workspaceId) &&
+      !/^path:[0-9a-f]{64}$/.test(raw.workspaceId))
   ) {
     throw new Error("workspaceId must be a ws_-prefixed UUID or path:<sha256>");
   }
-  if (typeof raw.displayName !== "string" || !raw.displayName.trim()) throw new Error("displayName is required");
-  if (raw.scope !== undefined && raw.scope !== "workspace" && raw.scope !== "global") {
+  if (typeof raw.displayName !== "string" || !raw.displayName.trim())
+    throw new Error("displayName is required");
+  if (
+    raw.scope !== undefined &&
+    raw.scope !== "workspace" &&
+    raw.scope !== "global"
+  ) {
     throw new Error("scope must be workspace or global");
   }
-  if (!Array.isArray(raw.repositories) || raw.repositories.some((item) => typeof item !== "string" || !item.trim())) {
+  if (
+    !Array.isArray(raw.repositories) ||
+    raw.repositories.some((item) => typeof item !== "string" || !item.trim())
+  ) {
     throw new Error("repositories must be an array of non-empty strings");
   }
-  if (typeof raw.createdAt !== "string" || Number.isNaN(Date.parse(raw.createdAt))) throw new Error("createdAt must be ISO time");
-  if (typeof raw.updatedAt !== "string" || Number.isNaN(Date.parse(raw.updatedAt))) throw new Error("updatedAt must be ISO time");
+  if (
+    typeof raw.createdAt !== "string" ||
+    Number.isNaN(Date.parse(raw.createdAt))
+  )
+    throw new Error("createdAt must be ISO time");
+  if (
+    typeof raw.updatedAt !== "string" ||
+    Number.isNaN(Date.parse(raw.updatedAt))
+  )
+    throw new Error("updatedAt must be ISO time");
   return {
     version: WORKSPACE_MARKER_VERSION,
     workspaceId: raw.workspaceId,
     displayName: raw.displayName.trim(),
     ...(raw.scope ? { scope: raw.scope } : {}),
-    repositories: [...new Set(raw.repositories.map((item) => item.trim()))].sort((a, b) => a.localeCompare(b)),
+    repositories: [
+      ...new Set(raw.repositories.map((item) => item.trim())),
+    ].sort((a, b) => a.localeCompare(b)),
     createdAt: raw.createdAt,
     updatedAt: raw.updatedAt,
   };
 }
 
-export async function readWorkspaceMarker(markerPath: string): Promise<WorkspaceMarker> {
+export async function readWorkspaceMarker(
+  markerPath: string,
+): Promise<WorkspaceMarker> {
   const content = await readFile(markerPath, "utf8");
   try {
     return parseWorkspaceMarker(JSON.parse(content) as unknown);
   } catch (error) {
-    throw new Error(`invalid workspace marker ${markerPath}: ${String(error)}`, { cause: error });
+    throw new Error(
+      `invalid workspace marker ${markerPath}: ${String(error)}`,
+      { cause: error },
+    );
   }
 }
 
@@ -96,9 +141,10 @@ export function pathWorkspaceId(root: string, home: string): string {
   const absoluteRoot = resolve(root);
   const absoluteHome = resolve(home);
   const relativeRoot = relative(absoluteHome, absoluteRoot);
-  const isHomeRelative = !isAbsolute(relativeRoot)
-    && relativeRoot !== ".."
-    && !relativeRoot.startsWith(`..${sep}`);
+  const isHomeRelative =
+    !isAbsolute(relativeRoot) &&
+    relativeRoot !== ".." &&
+    !relativeRoot.startsWith(`..${sep}`);
   const identity = isHomeRelative
     ? `home:${portablePath(relativeRoot || ".")}`
     : `absolute:${portablePath(absoluteRoot)}`;
@@ -121,7 +167,11 @@ export function createWorkspaceMarker(
   };
 }
 
-async function acquireLock(lockPath: string, timeoutMs = 5_000, staleMs = 30_000): Promise<() => Promise<void>> {
+async function acquireLock(
+  lockPath: string,
+  timeoutMs = 5_000,
+  staleMs = 30_000,
+): Promise<() => Promise<void>> {
   await mkdir(dirname(lockPath), { recursive: true, mode: 0o700 });
   const deadline = Date.now() + timeoutMs;
   while (true) {
@@ -130,7 +180,9 @@ async function acquireLock(lockPath: string, timeoutMs = 5_000, staleMs = 30_000
       await handle.writeFile(`${process.pid}\n${new Date().toISOString()}\n`);
       return async () => {
         await handle.close();
-        try { await unlink(lockPath); } catch (error) {
+        try {
+          await unlink(lockPath);
+        } catch (error) {
           if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
         }
       };
@@ -146,7 +198,8 @@ async function acquireLock(lockPath: string, timeoutMs = 5_000, staleMs = 30_000
         if ((statError as NodeJS.ErrnoException).code === "ENOENT") continue;
         throw statError;
       }
-      if (Date.now() >= deadline) throw new Error(`timed out waiting for lock: ${lockPath}`);
+      if (Date.now() >= deadline)
+        throw new Error(`timed out waiting for lock: ${lockPath}`);
       await new Promise((done) => setTimeout(done, 25));
     }
   }
@@ -155,7 +208,9 @@ async function acquireLock(lockPath: string, timeoutMs = 5_000, staleMs = 30_000
 async function writeJsonAtomic(path: string, value: unknown): Promise<void> {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   const temporary = `${path}.tmp-${process.pid}-${randomUUID()}`;
-  await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+  await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, {
+    mode: 0o600,
+  });
   await rename(temporary, path);
 }
 
@@ -166,7 +221,9 @@ export async function mutateWorkspaceMarker(
   const release = await acquireLock(`${markerPath}.lock`);
   try {
     let current: WorkspaceMarker | null = null;
-    try { current = await readWorkspaceMarker(markerPath); } catch (error) {
+    try {
+      current = await readWorkspaceMarker(markerPath);
+    } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
     const next = parseWorkspaceMarker(mutation(current));
@@ -182,13 +239,23 @@ export async function ensureMarker(
   root: string,
   workspaceId?: string,
 ): Promise<WorkspaceMarker> {
-  return mutateWorkspaceMarker(markerPath, (current) => current ?? createWorkspaceMarker(root, new Date(), workspaceId));
+  return mutateWorkspaceMarker(
+    markerPath,
+    (current) =>
+      current ?? createWorkspaceMarker(root, new Date(), workspaceId),
+  );
 }
 
-export async function registerRepository(markerPath: string, repositoryId: string): Promise<WorkspaceMarker> {
+export async function registerRepository(
+  markerPath: string,
+  repositoryId: string,
+): Promise<WorkspaceMarker> {
   return mutateWorkspaceMarker(markerPath, (current) => {
-    if (!current) throw new Error(`workspace marker does not exist: ${markerPath}`);
-    const repositories = [...new Set([...current.repositories, repositoryId])].sort((a, b) => a.localeCompare(b));
+    if (!current)
+      throw new Error(`workspace marker does not exist: ${markerPath}`);
+    const repositories = [
+      ...new Set([...current.repositories, repositoryId]),
+    ].sort((a, b) => a.localeCompare(b));
     return { ...current, repositories, updatedAt: new Date().toISOString() };
   });
 }
@@ -213,27 +280,43 @@ export async function findIndexedMarker(
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw error;
   }
-  if (index.version !== 1 || !index.workspaces || typeof index.workspaces !== "object") return null;
+  if (
+    index.version !== 1 ||
+    !index.workspaces ||
+    typeof index.workspaces !== "object"
+  )
+    return null;
   const path = await canonicalPath(observedPath);
-  const entries = await Promise.all(Object.values(index.workspaces).map(async (entry) => ({
-    entry,
-    paths: await Promise.all(entry.paths.map(canonicalPath)),
-  })));
+  const entries = await Promise.all(
+    Object.values(index.workspaces).map(async (entry) => ({
+      entry,
+      paths: await Promise.all(entry.paths.map(canonicalPath)),
+    })),
+  );
   const matches = entries.filter(({ entry, paths }) => {
     if (repositoryId && entry.repositories.includes(repositoryId)) return true;
-    return paths.some((candidate) => path === candidate || path.startsWith(`${candidate}/`));
+    return paths.some(
+      (candidate) => path === candidate || path.startsWith(`${candidate}/`),
+    );
   });
-  const matchingPathLength = (paths: string[]): number => paths.reduce(
-    (longest, candidate) => path === candidate || path.startsWith(`${candidate}/`)
-      ? Math.max(longest, candidate.length)
-      : longest,
-    0,
+  const matchingPathLength = (paths: string[]): number =>
+    paths.reduce(
+      (longest, candidate) =>
+        path === candidate || path.startsWith(`${candidate}/`)
+          ? Math.max(longest, candidate.length)
+          : longest,
+      0,
+    );
+  matches.sort(
+    (a, b) => matchingPathLength(b.paths) - matchingPathLength(a.paths),
   );
-  matches.sort((a, b) => matchingPathLength(b.paths) - matchingPathLength(a.paths));
   return matches[0]?.entry.markerPath ?? null;
 }
 
-export async function removeWorkspaceFromScopeIndex(indexPath: string, workspaceId: string): Promise<boolean> {
+export async function removeWorkspaceFromScopeIndex(
+  indexPath: string,
+  workspaceId: string,
+): Promise<boolean> {
   const release = await acquireLock(`${indexPath}.lock`);
   try {
     let index: ScopeIndex;
@@ -243,7 +326,11 @@ export async function removeWorkspaceFromScopeIndex(indexPath: string, workspace
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
       throw error;
     }
-    if (index.version !== 1 || !index.workspaces || typeof index.workspaces !== "object") {
+    if (
+      index.version !== 1 ||
+      !index.workspaces ||
+      typeof index.workspaces !== "object"
+    ) {
       throw new Error(`invalid scope index: ${indexPath}`);
     }
     if (!index.workspaces[workspaceId]) return false;
@@ -265,8 +352,15 @@ export async function updateScopeIndex(
   try {
     let index: ScopeIndex = { version: 1, workspaces: {} };
     try {
-      const parsed = JSON.parse(await readFile(indexPath, "utf8")) as ScopeIndex;
-      if (parsed.version === 1 && parsed.workspaces && typeof parsed.workspaces === "object") index = parsed;
+      const parsed = JSON.parse(
+        await readFile(indexPath, "utf8"),
+      ) as ScopeIndex;
+      if (
+        parsed.version === 1 &&
+        parsed.workspaces &&
+        typeof parsed.workspaces === "object"
+      )
+        index = parsed;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
@@ -275,10 +369,16 @@ export async function updateScopeIndex(
     const canonicalMarkerRoot = await canonicalPath(dirname(markerPath));
     index.workspaces[marker.workspaceId] = {
       markerPath,
-      paths: [...new Set([...(previous?.paths ?? []), canonicalObservedPath, canonicalMarkerRoot])]
-        .sort((a, b) => a.localeCompare(b)),
-      repositories: [...new Set([...(previous?.repositories ?? []), ...marker.repositories])]
-        .sort((a, b) => a.localeCompare(b)),
+      paths: [
+        ...new Set([
+          ...(previous?.paths ?? []),
+          canonicalObservedPath,
+          canonicalMarkerRoot,
+        ]),
+      ].sort((a, b) => a.localeCompare(b)),
+      repositories: [
+        ...new Set([...(previous?.repositories ?? []), ...marker.repositories]),
+      ].sort((a, b) => a.localeCompare(b)),
       updatedAt: new Date().toISOString(),
     };
     await writeJsonAtomic(indexPath, index);

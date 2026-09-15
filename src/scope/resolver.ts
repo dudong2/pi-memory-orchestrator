@@ -58,21 +58,36 @@ function isForbiddenWorkspaceRoot(path: string, home: string): boolean {
   return dirname(candidate) === candidate || isPathWithin(home, candidate);
 }
 
-async function excludeLocalMarker(git: GitContext, markerPath: string, markerName: string): Promise<void> {
+async function excludeLocalMarker(
+  git: GitContext,
+  markerPath: string,
+  markerName: string,
+): Promise<void> {
   if (resolve(dirname(markerPath)) !== resolve(git.mainRoot)) return;
   const excludePath = join(git.commonDir, "info", "exclude");
   await mkdir(dirname(excludePath), { recursive: true });
   let content = "";
-  try { content = await readFile(excludePath, "utf8"); } catch (error) {
+  try {
+    content = await readFile(excludePath, "utf8");
+  } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
   const rule = `/${markerName}`;
   if (content.split(/\r?\n/).includes(rule)) return;
   const handle = await open(excludePath, "a", 0o600);
-  try { await handle.write(`${content && !content.endsWith("\n") ? "\n" : ""}${rule}\n`); } finally { await handle.close(); }
+  try {
+    await handle.write(
+      `${content && !content.endsWith("\n") ? "\n" : ""}${rule}\n`,
+    );
+  } finally {
+    await handle.close();
+  }
 }
 
-export async function resolveScope(cwd: string, options: ResolveScopeOptions = {}): Promise<ResolvedScope> {
+export async function resolveScope(
+  cwd: string,
+  options: ResolveScopeOptions = {},
+): Promise<ResolvedScope> {
   const resolvedCwd = await canonicalPath(cwd);
   const markerName = options.markerName ?? DEFAULT_MARKER_NAME;
   const dataDir = options.dataDir ?? DEFAULT_CONFIG.dataDir;
@@ -80,13 +95,28 @@ export async function resolveScope(cwd: string, options: ResolveScopeOptions = {
   const git = resolveGitContext(resolvedCwd);
   const searchBoundary = isPathWithin(resolvedCwd, home) ? home : undefined;
 
-  let markerPath = await findNearestMarker(resolvedCwd, markerName, searchBoundary);
+  let markerPath = await findNearestMarker(
+    resolvedCwd,
+    markerName,
+    searchBoundary,
+  );
   if (!markerPath && git && resolve(git.mainRoot) !== resolvedCwd) {
-    markerPath = await findNearestMarker(git.mainRoot, markerName, searchBoundary);
+    markerPath = await findNearestMarker(
+      git.mainRoot,
+      markerName,
+      searchBoundary,
+    );
   }
   if (!markerPath) {
-    const indexed = await findIndexedMarker(join(dataDir, "scope-index.json"), resolvedCwd, git?.repositoryId);
-    if (indexed && !isForbiddenWorkspaceRoot(await canonicalPath(dirname(indexed)), home)) {
+    const indexed = await findIndexedMarker(
+      join(dataDir, "scope-index.json"),
+      resolvedCwd,
+      git?.repositoryId,
+    );
+    if (
+      indexed &&
+      !isForbiddenWorkspaceRoot(await canonicalPath(dirname(indexed)), home)
+    ) {
       try {
         await readWorkspaceMarker(indexed);
         markerPath = indexed;
@@ -98,17 +128,29 @@ export async function resolveScope(cwd: string, options: ResolveScopeOptions = {
 
   const workspaceRoot = markerPath
     ? dirname(markerPath)
-    : git?.mainRoot ?? await canonicalPath(options.startCwd ?? resolvedCwd);
-  if (isForbiddenWorkspaceRoot(workspaceRoot, home)) throw new ScopeBoundaryError(workspaceRoot);
+    : (git?.mainRoot ?? (await canonicalPath(options.startCwd ?? resolvedCwd)));
+  if (isForbiddenWorkspaceRoot(workspaceRoot, home))
+    throw new ScopeBoundaryError(workspaceRoot);
   markerPath ??= join(workspaceRoot, markerName);
 
-  const generatedWorkspaceId = git ? undefined : pathWorkspaceId(workspaceRoot, home);
-  let marker = await ensureMarker(markerPath, workspaceRoot, generatedWorkspaceId);
+  const generatedWorkspaceId = git
+    ? undefined
+    : pathWorkspaceId(workspaceRoot, home);
+  let marker = await ensureMarker(
+    markerPath,
+    workspaceRoot,
+    generatedWorkspaceId,
+  );
   if (git) {
     marker = await registerRepository(markerPath, git.repositoryId);
     await excludeLocalMarker(git, markerPath, markerName);
   }
-  await updateScopeIndex(join(dataDir, "scope-index.json"), markerPath, marker, resolvedCwd);
+  await updateScopeIndex(
+    join(dataDir, "scope-index.json"),
+    markerPath,
+    marker,
+    resolvedCwd,
+  );
 
   const result: ResolvedScope = {
     workspaceRoot,
