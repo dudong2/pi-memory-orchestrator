@@ -131,7 +131,9 @@ const summary = {
 };
 
 if (!apply) {
-  console.log(JSON.stringify({ apply: false, ...summary }, null, 2));
+  process.stdout.write(
+    `${JSON.stringify({ apply: false, ...summary }, null, 2)}\n`,
+  );
   process.exit(0);
 }
 
@@ -226,4 +228,6 @@ await writeFile(
   `${JSON.stringify({ apply: true, completedAt: new Date().toISOString(), ...summary }, null, 2)}\n`,
   { mode: 0o600 },
 );
-console.log(JSON.stringify({ apply: true, ...summary }, null, 2));
+process.stdout.write(
+  `${JSON.stringify({ apply: true, ...summary }, null, 2)}\n`,
+);

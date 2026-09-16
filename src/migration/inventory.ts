@@ -143,9 +143,10 @@ export async function buildMigrationInventory(options: InventoryOptions): Promis
     reason: "invalidated source history is retained for audit and is not made recall-visible",
     sourceSha256: createHash("sha256").update(JSON.stringify(item)).digest("hex"),
   })));
-  const duplicateGroups = [...factLocations.entries()]
-    .filter(([, locations]) => locations.length > 1)
-    .map(([normalizedSha256, locations]) => ({ normalizedSha256, locations }));
+  const duplicateGroups = [...factLocations.entries()].flatMap(
+    ([normalizedSha256, locations]) =>
+      locations.length > 1 ? [{ normalizedSha256, locations }] : [],
+  );
 
   const actionCounts = documents.reduce<Record<string, number>>((counts, document) => {
     const action = String(document.action);

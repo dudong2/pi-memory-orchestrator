@@ -23,4 +23,4 @@ for (const record of Object.values(catalog.scopes)) {
     migrated: project !== null,
   });
 }
-console.log(JSON.stringify(results, null, 2));
+process.stdout.write(`${JSON.stringify(results, null, 2)}\n`);

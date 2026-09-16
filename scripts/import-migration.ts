@@ -16,7 +16,7 @@ if (importOperationId) await waitForOperation(importOperationId, 300_000);
 const consolidation = await client.triggerConsolidation(bankId);
 const consolidationOperationId = typeof consolidation.operation_id === "string" ? consolidation.operation_id : undefined;
 if (consolidationOperationId) await waitForOperation(consolidationOperationId, 300_000);
-console.log(JSON.stringify({ imported, consolidation }));
+process.stdout.write(`${JSON.stringify({ imported, consolidation })}\n`);
 
 async function waitForOperation(operationId: string, timeoutMs: number): Promise<void> {
   const deadline = Date.now() + timeoutMs;

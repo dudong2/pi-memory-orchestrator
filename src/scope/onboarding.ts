@@ -117,7 +117,10 @@ export async function onboardScope(
   while (true) {
     const scopeName = await chooseScopeName(ctx, config, project, root);
     if (!scopeName) {
-      ctx.ui.notify("Scope 등록을 취소했습니다. 메모리 없이 계속합니다.", "info");
+      ctx.ui.notify(
+        "Scope 등록을 취소했습니다. 메모리 없이 계속합니다.",
+        "info",
+      );
       return null;
     }
     const input: CreateScopeInput = {

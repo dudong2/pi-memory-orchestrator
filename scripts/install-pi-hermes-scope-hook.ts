@@ -58,4 +58,6 @@ config.projectResolutionMode = "external";
 await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, {
   mode: 0o600,
 });
-console.log(JSON.stringify({ status, packageRoot, configPath }));
+process.stdout.write(
+  `${JSON.stringify({ status, packageRoot, configPath })}\n`,
+);

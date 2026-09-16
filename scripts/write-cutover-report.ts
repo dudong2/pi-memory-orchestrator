@@ -170,13 +170,13 @@ await writeFile(
   `${JSON.stringify(report, null, 2)}\n`,
   { mode: 0o600 },
 );
-console.log(
-  JSON.stringify({
+process.stdout.write(
+  `${JSON.stringify({
     passed,
     status: report.status,
     pendingConsolidation: report.hindsight.pendingConsolidation,
     observations: report.hindsight.observations,
-  }),
+  })}\n`,
 );
 if (!passed) process.exitCode = 1;
 

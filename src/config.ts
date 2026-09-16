@@ -104,11 +104,18 @@ export function resolveHindsightConnection(config: OrchestratorConfig): { apiUrl
       apiToken?: unknown;
       apiKey?: unknown;
     };
-    const apiUrl = typeof parsed.apiUrl === "string" && parsed.apiUrl.trim() ? parsed.apiUrl : config.apiUrl;
-    const token = typeof parsed.apiToken === "string" && parsed.apiToken.trim()
-      ? parsed.apiToken
-      : typeof parsed.apiKey === "string" && parsed.apiKey.trim() ? parsed.apiKey : undefined;
-    return { apiUrl, ...(token ? { apiToken: token } : {}) };
+    const apiUrl =
+      typeof parsed.apiUrl === "string" && parsed.apiUrl.trim()
+        ? parsed.apiUrl
+        : config.apiUrl;
+    let token: string | undefined;
+    if (typeof parsed.apiToken === "string" && parsed.apiToken.trim()) {
+      token = parsed.apiToken;
+    } else if (typeof parsed.apiKey === "string" && parsed.apiKey.trim()) {
+      token = parsed.apiKey;
+    }
+    if (token) return { apiUrl, apiToken: token };
+    return { apiUrl };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return { apiUrl: config.apiUrl };
     throw error;

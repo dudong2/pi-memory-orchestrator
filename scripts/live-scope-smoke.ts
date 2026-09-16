@@ -77,7 +77,7 @@ const result = {
   siblingBlocked: !text.includes("sibling-blocked"),
   untaggedBlocked: !text.includes("untagged-blocked"),
 };
-console.log(JSON.stringify(result));
+process.stdout.write(`${JSON.stringify(result)}\n`);
 if (
   !Object.values(result).every(
     (value) => typeof value === "number" || value === true,

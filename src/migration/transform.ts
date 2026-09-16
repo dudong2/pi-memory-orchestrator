@@ -132,8 +132,8 @@ export async function transformArchive(
         // Observations are intentionally omitted so the target scope can rebuild them.
         // A whole-bank export carries source consolidation lifecycle; retaining it would
         // mark these facts complete while their source observations no longer exist.
-        delete fact.consolidated_at;
-        delete fact.consolidation_failed_at;
+        fact.consolidated_at = undefined;
+        fact.consolidation_failed_at = undefined;
       }
       await writeFile(path, `${JSON.stringify(document, null, 2)}\n`, {
         mode: 0o600,
@@ -155,19 +155,17 @@ export async function transformArchive(
       (sum, document) => sum + (document.facts?.length ?? 0),
       0,
     );
-    Object.assign(manifest, {
-      source_bank_id: sourceBankId,
-      exported_at: new Date().toISOString(),
-      document_count: kept.length,
-      fact_count: factCount,
-      observation_count: 0,
-      archive_type: "documents",
-      mental_model_count: 0,
-      knowledge_page_count: 0,
-      directive_count: 0,
-      webhook_count: 0,
-      includes_history: false,
-    });
+    manifest.source_bank_id = sourceBankId;
+    manifest.exported_at = new Date().toISOString();
+    manifest.document_count = kept.length;
+    manifest.fact_count = factCount;
+    manifest.observation_count = 0;
+    manifest.archive_type = "documents";
+    manifest.mental_model_count = 0;
+    manifest.knowledge_page_count = 0;
+    manifest.directive_count = 0;
+    manifest.webhook_count = 0;
+    manifest.includes_history = false;
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, {
       mode: 0o600,
     });

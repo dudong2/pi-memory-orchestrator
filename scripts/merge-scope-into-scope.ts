@@ -145,7 +145,7 @@ const targetDocuments = await list("documents", target.memoryTag);
 const targetMemories = await list("memories/list", target.memoryTag);
 const documentIds = (sourceDocuments.items ?? [])
   .map((document) => document.id)
-  .sort();
+  .sort((a, b) => a.localeCompare(b));
 const summary = {
   apply,
   bankId,
@@ -160,7 +160,7 @@ const summary = {
   documentIds,
   backupDir,
 };
-console.log(JSON.stringify(summary, null, 2));
+process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
 if (!apply) process.exit(0);
 if (await blockingOperationCount()) {
   throw new Error("Hindsight has blocking active or failed operations");
@@ -300,4 +300,4 @@ await writeFile(
   `${JSON.stringify(report, null, 2)}\n`,
   { mode: 0o600 },
 );
-console.log(JSON.stringify(report.final, null, 2));
+process.stdout.write(`${JSON.stringify(report.final, null, 2)}\n`);

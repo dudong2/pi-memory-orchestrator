@@ -28,8 +28,12 @@ export function canonicalizeGitRemote(remote: string): string | undefined {
 
   const scp = /^(?:[^@/\s]+@)?([^:/\s]+):(.+)$/.exec(value);
   if (scp && !/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) {
-    const path = scp[2]!.replace(/^\/+|\/+$/g, "").replace(/\.git$/i, "");
-    return path ? `${scp[1]!.toLowerCase()}/${path.toLowerCase()}` : undefined;
+    const [, host, remotePath] = scp;
+    if (!host || !remotePath) return undefined;
+    const path = remotePath
+      .replace(/^\/+|\/+$/g, "")
+      .replace(/\.git$/i, "");
+    return path ? `${host.toLowerCase()}/${path.toLowerCase()}` : undefined;
   }
 
   try {

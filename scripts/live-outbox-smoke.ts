@@ -38,6 +38,6 @@ await outbox.enqueue({
 });
 const result = await outbox.drain(client);
 const counts = await outbox.counts();
-console.log(JSON.stringify({ result, counts }));
+process.stdout.write(`${JSON.stringify({ result, counts })}\n`);
 if (result.completed !== 1 || counts.pending !== 0 || counts.processing !== 0)
   process.exitCode = 1;

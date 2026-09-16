@@ -124,8 +124,7 @@ export class RetainOutbox {
     };
     const path = join(this.#pendingDir, `${job.id}.json`);
     try {
-      const existing = parseJob(await readFile(path, "utf8"), path);
-      return existing;
+      return parseJob(await readFile(path, "utf8"), path);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }

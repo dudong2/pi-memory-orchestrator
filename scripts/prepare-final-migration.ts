@@ -58,13 +58,13 @@ await writeFile(
   `${JSON.stringify({ version: 1, createdAt: new Date().toISOString(), targetBank: "coding-agent::dudong2", results }, null, 2)}\n`,
   { mode: 0o600 },
 );
-console.log(
-  JSON.stringify({
+process.stdout.write(
+  `${JSON.stringify({
     groups: results.length,
     documents: results.reduce(
       (sum, item) => sum + item.verification.documentCount,
       0,
     ),
     facts: results.reduce((sum, item) => sum + item.verification.factCount, 0),
-  }),
+  })}\n`,
 );

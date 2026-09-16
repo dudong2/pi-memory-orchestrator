@@ -17,13 +17,13 @@ const initial = await client.knowledgeTree(bankId);
 const legacy = initial.roots.find(
   (node) => node.kind === "folder" && node.name === "Coding Workspaces",
 );
-console.log(
-  JSON.stringify({
+process.stdout.write(
+  `${JSON.stringify({
     apply,
     bankId,
     scopes: Object.keys(catalog.scopes).length,
     legacyRoot: legacy?.id ?? null,
-  }),
+  })}\n`,
 );
 if (!apply) process.exit(0);
 
@@ -48,11 +48,11 @@ const projectRoot = updated.roots.find(
 );
 if (!projectRoot) throw new Error("Coding Projects root was not created");
 if (legacy) await client.deleteKnowledgeNode(bankId, legacy.id);
-console.log(
-  JSON.stringify({
+process.stdout.write(
+  `${JSON.stringify({
     createdFolders,
     createdPages,
     projectRoot: projectRoot.id,
     removedLegacyRoot: legacy?.id ?? null,
-  }),
+  })}\n`,
 );

@@ -21,12 +21,12 @@ if (command === "transform") {
   const verification = await verifyTransformedArchive(outputArchive, scopeTag);
   const manifestPath = `${outputArchive}.manifest.json`;
   await writeFile(manifestPath, `${JSON.stringify({ version: 1, createdAt: new Date().toISOString(), result, verification }, null, 2)}\n`, { mode: 0o600 });
-  console.log(JSON.stringify({ manifestPath, documentCount: verification.documentCount, factCount: verification.factCount }));
+  process.stdout.write(`${JSON.stringify({ manifestPath, documentCount: verification.documentCount, factCount: verification.factCount })}\n`);
 } else if (command === "verify") {
   const archive = option("archive");
   const scopeTag = option("scope");
   if (!archive || !scopeTag) throw new Error("verify requires --archive and --scope");
-  console.log(JSON.stringify(await verifyTransformedArchive(archive, scopeTag)));
+  process.stdout.write(`${JSON.stringify(await verifyTransformedArchive(archive, scopeTag))}\n`);
 } else {
   throw new Error("usage: migration <transform|verify> [options]");
 }

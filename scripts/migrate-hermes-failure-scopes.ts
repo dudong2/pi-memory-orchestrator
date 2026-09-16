@@ -25,4 +25,6 @@ if (updated !== original) {
   await writeFile(temporary, updated, { mode: 0o600 });
   await rename(temporary, path);
 }
-console.log(JSON.stringify({ changed: updated !== original, path }));
+process.stdout.write(
+  `${JSON.stringify({ changed: updated !== original, path })}\n`,
+);

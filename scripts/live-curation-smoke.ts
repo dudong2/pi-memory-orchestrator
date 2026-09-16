@@ -66,5 +66,5 @@ const result = {
     item.text.includes(token),
   ),
 };
-console.log(JSON.stringify(result));
+process.stdout.write(`${JSON.stringify(result)}\n`);
 if (!Object.values(result).every(Boolean)) process.exitCode = 1;
