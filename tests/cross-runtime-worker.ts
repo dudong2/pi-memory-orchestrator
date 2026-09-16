@@ -1,9 +1,22 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { loadConfig } from "/tmp/pi-hermes-memory-audit/src/config.ts";
-import { MemoryStore } from "/tmp/pi-hermes-memory-audit/src/store/memory-store.ts";
-import { DatabaseManager } from "/tmp/pi-hermes-memory-audit/src/store/db.ts";
-import { syncMemoryEntry } from "/tmp/pi-hermes-memory-audit/src/store/sqlite-memory-store.ts";
+import { pathToFileURL } from "node:url";
+
+const hermesRoot =
+  process.env.PI_HERMES_MEMORY_ROOT ?? "/tmp/pi-hermes-memory-audit";
+const [
+  { loadConfig },
+  { MemoryStore },
+  { DatabaseManager },
+  { syncMemoryEntry },
+] = await Promise.all([
+  import(pathToFileURL(join(hermesRoot, "src/config.ts")).href),
+  import(pathToFileURL(join(hermesRoot, "src/store/memory-store.ts")).href),
+  import(pathToFileURL(join(hermesRoot, "src/store/db.ts")).href),
+  import(
+    pathToFileURL(join(hermesRoot, "src/store/sqlite-memory-store.ts")).href
+  ),
+]);
 
 const [memoryDir, prefix, rawCount] = process.argv.slice(2);
 if (!memoryDir || !prefix) throw new Error("usage: cross-runtime-worker <memory-dir> <prefix> [count]");

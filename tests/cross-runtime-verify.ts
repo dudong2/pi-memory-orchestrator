@@ -1,9 +1,18 @@
 import assert from "node:assert/strict";
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
-import { loadConfig } from "/tmp/pi-hermes-memory-audit/src/config.ts";
-import { MemoryStore } from "/tmp/pi-hermes-memory-audit/src/store/memory-store.ts";
-import { DatabaseManager } from "/tmp/pi-hermes-memory-audit/src/store/db.ts";
+import { pathToFileURL } from "node:url";
+
+const hermesRoot =
+  process.env.PI_HERMES_MEMORY_ROOT ?? "/tmp/pi-hermes-memory-audit";
+const [{ loadConfig }, { MemoryStore }, { DatabaseManager }] =
+  await Promise.all([
+    import(pathToFileURL(join(hermesRoot, "src/config.ts")).href),
+    import(
+      pathToFileURL(join(hermesRoot, "src/store/memory-store.ts")).href
+    ),
+    import(pathToFileURL(join(hermesRoot, "src/store/db.ts")).href),
+  ]);
 
 const memoryDir = process.env.TEST_DIR;
 if (!memoryDir) throw new Error("TEST_DIR is required");
