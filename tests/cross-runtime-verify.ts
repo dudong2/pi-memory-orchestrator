@@ -8,9 +8,7 @@ const hermesRoot =
 const [{ loadConfig }, { MemoryStore }, { DatabaseManager }] =
   await Promise.all([
     import(pathToFileURL(join(hermesRoot, "src/config.ts")).href),
-    import(
-      pathToFileURL(join(hermesRoot, "src/store/memory-store.ts")).href
-    ),
+    import(pathToFileURL(join(hermesRoot, "src/store/memory-store.ts")).href),
     import(pathToFileURL(join(hermesRoot, "src/store/db.ts")).href),
   ]);
 
@@ -34,15 +32,33 @@ manager.setQuickCheckOnOpen(false);
 const db = manager.getDb() as unknown as {
   prepare(sql: string): { get(...args: unknown[]): Record<string, unknown> };
 };
-const row = db.prepare("SELECT count(*) AS count FROM memories WHERE content LIKE '%-entry-%'").get();
+const row = db
+  .prepare(
+    "SELECT count(*) AS count FROM memories WHERE content LIKE '%-entry-%'",
+  )
+  .get();
 const integrity = db.prepare("PRAGMA integrity_check").get();
 manager.close();
 
 const files = await readdir(memoryDir);
 const conflicts = files.filter((name) => name.includes("conflict"));
-assert.equal(entries.length, 80, "all Markdown entries must survive concurrent writers");
+assert.equal(
+  entries.length,
+  80,
+  "all Markdown entries must survive concurrent writers",
+);
 assert.equal(uniqueEntries.size, 80, "Markdown entries must be unique");
-assert.equal(Number(row.count), 80, "all SQLite rows must survive concurrent writers");
-assert.equal(String(Object.values(integrity)[0]), "ok", "SQLite integrity_check must pass");
+assert.equal(
+  Number(row.count),
+  80,
+  "all SQLite rows must survive concurrent writers",
+);
+assert.equal(
+  String(Object.values(integrity)[0]),
+  "ok",
+  "SQLite integrity_check must pass",
+);
 assert.deepEqual(conflicts, [], "no conflict recovery files should be created");
-console.log(`markdown=${entries.length} sqlite=${row.count} integrity=ok conflicts=0`);
+console.log(
+  `markdown=${entries.length} sqlite=${row.count} integrity=ok conflicts=0`,
+);

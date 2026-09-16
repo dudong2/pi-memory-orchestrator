@@ -125,10 +125,7 @@ test("adding an origin promotes a local repository identity without replacing it
   const scope = await resolveScope(root, { dataDir });
   assert.equal(scope?.scopeId, registered.scopeId);
   assert.equal(scope?.scopeTag, registered.memoryTag);
-  assert.equal(
-    scope?.repositoryId,
-    "github.com/dudong2/published-later",
-  );
+  assert.equal(scope?.repositoryId, "github.com/dudong2/published-later");
   const catalog = await loadScopeCatalog(dataDir);
   assert.equal(
     catalog.scopes[registered.scopeId]?.repositoryId,

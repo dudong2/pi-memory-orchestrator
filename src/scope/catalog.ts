@@ -479,8 +479,7 @@ export async function promoteScopeRepositoryId(
     }
     const conflict = Object.values(catalog.scopes).some(
       (scope) =>
-        scope.scopeId !== scopeId &&
-        scope.repositoryId === remoteRepositoryId,
+        scope.scopeId !== scopeId && scope.repositoryId === remoteRepositoryId,
     );
     if (conflict) return null;
     const next: ScopeRecord = {
