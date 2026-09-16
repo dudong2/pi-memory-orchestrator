@@ -1,0 +1,67 @@
+# These hint-only rules conflict with this package's boundary-heavy design:
+# untrusted extension events and Hindsight JSON require runtime narrowing,
+# conditional metadata fields are intentionally omitted with object spreads,
+# and the client/provider classes mirror one cohesive external API. Keep all
+# warning/error rules enabled; override only these non-actionable style hints.
+id: large-class
+language: TypeScript
+severity: hint
+message: "Disabled for pi-memory-orchestrator: cohesive boundary adapters may remain single classes"
+rule:
+  pattern: __pi_memory_orchestrator_disabled_hint__($$$ARGS)
+---
+id: long-parameter-list
+language: TypeScript
+severity: hint
+message: "Disabled for pi-memory-orchestrator: existing boundary functions use explicit parameters"
+rule:
+  pattern: __pi_memory_orchestrator_disabled_hint__($$$ARGS)
+---
+id: no-any-type
+language: TypeScript
+severity: hint
+message: "Disabled for pi-memory-orchestrator: migration readers preserve external archive shapes"
+rule:
+  pattern: __pi_memory_orchestrator_disabled_hint__($$$ARGS)
+---
+id: no-await-expression-member
+language: TypeScript
+severity: hint
+message: "Disabled for pi-memory-orchestrator: parenthesized await member access is intentional"
+rule:
+  pattern: __pi_memory_orchestrator_disabled_hint__($$$ARGS)
+---
+id: no-conditional-empty-object-spread
+language: TypeScript
+severity: hint
+message: "Disabled for pi-memory-orchestrator: optional metadata fields must be omitted, not undefined"
+rule:
+  pattern: __pi_memory_orchestrator_disabled_hint__($$$ARGS)
+---
+id: no-known-value-widening
+language: TypeScript
+severity: hint
+message: "Disabled for pi-memory-orchestrator: mutable API payload maps intentionally widen values"
+rule:
+  pattern: __pi_memory_orchestrator_disabled_hint__($$$ARGS)
+---
+id: no-runtime-typeof
+language: TypeScript
+severity: hint
+message: "Disabled for pi-memory-orchestrator: untrusted extension and HTTP boundaries require runtime narrowing"
+rule:
+  pattern: __pi_memory_orchestrator_disabled_hint__($$$ARGS)
+---
+id: no-unknown-parameters
+language: TypeScript
+severity: hint
+message: "Disabled for pi-memory-orchestrator: unknown is required at untrusted I/O boundaries"
+rule:
+  pattern: __pi_memory_orchestrator_disabled_hint__($$$ARGS)
+---
+id: no-unsafe-dictionary-unknown
+language: TypeScript
+severity: hint
+message: "Disabled for pi-memory-orchestrator: Hindsight JSON dictionaries are narrowed before use"
+rule:
+  pattern: __pi_memory_orchestrator_disabled_hint__($$$ARGS)

@@ -9,10 +9,8 @@ import { ScopedHindsightProvider } from "../src/hindsight/provider.js";
 import type { ResolvedScope } from "../src/scope/resolver.js";
 import {
   acceptanceScope as scope,
-  currentRepo,
   sharedAcceptanceScope,
   siblingAcceptanceScope,
-  siblingRepo,
 } from "./acceptance-scope.js";
 
 const outputDir = process.argv[2];
@@ -246,8 +244,8 @@ await writeFile(
   `${JSON.stringify(report, null, 2)}\n`,
   { mode: 0o600 },
 );
-console.log(
-  JSON.stringify({
+process.stdout.write(
+  `${JSON.stringify({
     capturedTurns: report.capturedTurns,
     correctionChains: report.correctionChains,
     recallQueries: report.recallQueries,
@@ -257,7 +255,7 @@ console.log(
     p95Ms: Math.round(report.p95Ms),
     maxMs: Math.round(report.maxMs),
     outboxCounts,
-  }),
+  })}\n`,
 );
 if (failures.length || report.p95Ms > 5_000) process.exitCode = 1;
 
@@ -292,15 +290,20 @@ async function readCredits(): Promise<unknown> {
     `${process.env.HOME}/.hindsight/hindsight-control/server.env`,
     "utf8",
   );
-  const line = env
-    .split(/\r?\n/)
-    .find((item) =>
-      item.startsWith("HINDSIGHT_API_RERANKER_OPENROUTER_API_KEY="),
-    );
-  const key = line?.split("=").slice(1).join("=").trim();
-  if (!key) return null;
+  const lines = env.split(/\r?\n/);
+  const value = (name: string) =>
+    lines
+      .find((item) => item.startsWith(`${name}=`))
+      ?.split("=")
+      .slice(1)
+      .join("=")
+      .trim();
+  const key = value("HINDSIGHT_API_RERANKER_OPENROUTER_API_KEY");
+  const rerankerUrl = value("HINDSIGHT_API_RERANKER_OPENROUTER_BASE_URL");
+  if (!key || !rerankerUrl) return null;
+  const creditsUrl = new URL("/api/v1/credits", rerankerUrl);
   try {
-    const response = await fetch("https://openrouter.ai/api/v1/credits", {
+    const response = await fetch(creditsUrl, {
       headers: { Authorization: `Bearer ${key}` },
       signal: AbortSignal.timeout(10_000),
     });

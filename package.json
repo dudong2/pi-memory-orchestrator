@@ -1,6 +1,6 @@
 {
   "name": "pi-memory-orchestrator",
-  "version": "0.1.0",
+  "version": "1.1.0",
   "description": "Shared scoped memory orchestration for Pi and OMP with local Hindsight.",
   "type": "module",
   "main": "src/index.ts",

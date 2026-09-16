@@ -32,28 +32,34 @@ const scopes = parseJson<{ resolved: Record<string, ResolvedScope> }>(
   await readFile(join(backup, "migrations", "scopes.json"), "utf8"),
   "migration scopes",
 );
+function requiredScope(name: string): ResolvedScope {
+  const resolved = scopes.resolved[name];
+  if (!resolved) throw new Error(`missing resolved scope: ${name}`);
+  return resolved;
+}
+
 const cases = [
   {
     name: "LuckyCat no-fill",
-    scope: scopes.resolved.luckyCat!,
+    scope: requiredScope("luckyCat"),
     query: "What is the verified LuckyCat no-fill scope rule?",
     expected: ["no-fill"],
   },
   {
     name: "LuckyCat walking",
-    scope: scopes.resolved.luckyCat!,
+    scope: requiredScope("luckyCat"),
     query: "What is the walking_booster_x10 QA convention?",
     expected: ["walking_booster_x10"],
   },
   {
     name: "orchestrator",
-    scope: scopes.resolved.orchestrator!,
+    scope: requiredScope("orchestrator"),
     query: "How does the memory orchestrator use Hindsight tag_groups?",
     expected: ["tag_groups"],
   },
   {
     name: "memory",
-    scope: scopes.resolved.memory!,
+    scope: requiredScope("memory"),
     query:
       "What Hindsight bank scoping rules were learned in the memory workspace?",
     expected: ["Hindsight", "bank"],
@@ -78,13 +84,13 @@ const results = await Promise.all(
     };
   }),
 );
-console.log(
-  JSON.stringify(
+process.stdout.write(
+  `${JSON.stringify(
     results.map((item) => ({
       ...item,
       durationMs: Math.round(item.durationMs),
     })),
-  ),
+  )}\n`,
 );
 if (results.some((item) => !item.ok || item.durationMs > 5_000))
   process.exitCode = 1;

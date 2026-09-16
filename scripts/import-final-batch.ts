@@ -45,12 +45,12 @@ const output = join(backup, "migrations", "final-import-result.json");
 await writeFile(output, `${JSON.stringify(result, null, 2)}\n`, {
   mode: 0o600,
 });
-console.log(
-  JSON.stringify({
+process.stdout.write(
+  `${JSON.stringify({
     targetBank: manifest.targetBank,
     importGroups: imports.length,
     consolidation: "completed",
-  }),
+  })}\n`,
 );
 
 async function wait(operationId: string, timeoutMs: number): Promise<void> {

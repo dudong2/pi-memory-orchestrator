@@ -1,4 +1,3 @@
-import { join } from "node:path";
 import { loadConfig, resolveHindsightConnection } from "../src/config.js";
 import { HindsightClient } from "../src/hindsight/client.js";
 import { ensureKnowledgeViews } from "../src/hindsight/knowledge.js";
@@ -29,6 +28,6 @@ const visit = (nodes: typeof tree.roots) => {
   }
 };
 visit(tree.roots);
-console.log(JSON.stringify({ first, second, names }));
+process.stdout.write(`${JSON.stringify({ first, second, names })}\n`);
 if (second.createdFolders !== 0 || second.createdPages !== 0)
   process.exitCode = 1;

@@ -1,7 +1,6 @@
 import type { OrchestratorConfig } from "../config.js";
 import {
   buildScopeQueryPlan,
-  GLOBAL_SCOPE_TAG,
   type ScopeQueryOptions,
   type ScopeQueryPlan,
 } from "../scope/query.js";

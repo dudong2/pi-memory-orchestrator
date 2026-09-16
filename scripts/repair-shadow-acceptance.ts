@@ -108,14 +108,14 @@ await writeFile(temporary, `${JSON.stringify(report, null, 2)}\n`, {
   mode: 0o600,
 });
 await rename(temporary, reportPath);
-console.log(
-  JSON.stringify({
+process.stdout.write(
+  `${JSON.stringify({
     drain,
     repairedQueries: repaired.length,
     successfulQueries: report.successfulQueries,
     failedQueries: report.failedQueries,
     p95Ms: Math.round(Number(report.p95Ms)),
-  }),
+  })}\n`,
 );
 
 async function waitForOperation(

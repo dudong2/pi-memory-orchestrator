@@ -26,4 +26,4 @@ for (const name of ["orchestrator", "luckyCat", "memory"]) {
     result: await ensureKnowledgeViews(client, "coding-agent::dudong2", scope),
   });
 }
-console.log(JSON.stringify(results));
+process.stdout.write(`${JSON.stringify(results)}\n`);

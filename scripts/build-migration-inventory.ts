@@ -25,4 +25,4 @@ const inventory = await buildMigrationInventory({
   scopeMappings: scopes.mappings,
   outputPath: join(backup, "migrations", "inventory.json"),
 });
-console.log(JSON.stringify(inventory.summary));
+process.stdout.write(`${JSON.stringify(inventory.summary)}\n`);

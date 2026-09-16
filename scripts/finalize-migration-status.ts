@@ -36,14 +36,14 @@ const documents = (await get(
 };
 const documentIds = new Set(documents.items.map((item) => item.id));
 const documentMap = new Map(documents.items.map((item) => [item.id, item]));
-const missingDocuments = expected
-  .filter((item) => !documentIds.has(item.documentId))
-  .map((item) => `${item.bankId}/${item.documentId}`);
+const missingDocuments = expected.flatMap((item) =>
+  documentIds.has(item.documentId)
+    ? []
+    : [`${item.bankId}/${item.documentId}`],
+);
 const scopeTags = [
   ...new Set(
-    expected
-      .map((item) => item.scopeTag)
-      .filter((tag): tag is string => Boolean(tag)),
+    expected.flatMap((item) => (item.scopeTag ? [item.scopeTag] : [])),
   ),
 ];
 const scopeCounts = [];
@@ -104,14 +104,14 @@ await writeFile(
   `${JSON.stringify(result, null, 2)}\n`,
   { mode: 0o600 },
 );
-console.log(
-  JSON.stringify({
+process.stdout.write(
+  `${JSON.stringify({
     documents: expected.length,
     migratedRawFacts: migratedRawFactCount,
     liveScopeRawFacts: scopeRawFactCount,
     knowledgeNodes: result.knowledgeNodes,
     consolidation: result.consolidationStatus,
-  }),
+  })}\n`,
 );
 
 async function get(path: string): Promise<unknown> {
