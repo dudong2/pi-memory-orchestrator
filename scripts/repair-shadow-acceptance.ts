@@ -10,9 +10,12 @@ import { parseJson } from "../src/json.js";
 import type { ResolvedScope } from "../src/scope/resolver.js";
 
 const reportPath = process.argv[2];
-if (!reportPath) throw new Error("usage: repair-shadow-acceptance <shadow-acceptance.json>");
+if (!reportPath)
+  throw new Error("usage: repair-shadow-acceptance <shadow-acceptance.json>");
 const initialPath = join(dirname(reportPath), "shadow-acceptance-initial.json");
-try { await copyFile(reportPath, initialPath, constants.COPYFILE_EXCL); } catch (error) {
+try {
+  await copyFile(reportPath, initialPath, constants.COPYFILE_EXCL);
+} catch (error) {
   if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
 }
 
@@ -44,38 +47,45 @@ const scope: ResolvedScope = {
   git: null,
   scopeTag: `scope:repo:${currentRepo}`,
   kind: "repository",
-  ancestors: [{
-    root: "/acceptance",
-    markerPath: "/acceptance/.pi-memory-scope.json",
-    marker: {
-      version: 1,
-      workspaceId,
-      displayName: "acceptance-workspace",
-      repositories: [],
-      createdAt: "2026-01-01T00:00:00.000Z",
-      updatedAt: "2026-03-01T00:00:00.000Z",
+  ancestors: [
+    {
+      root: "/acceptance",
+      markerPath: "/acceptance/.pi-memory-scope.json",
+      marker: {
+        version: 1,
+        workspaceId,
+        displayName: "acceptance-workspace",
+        repositories: [],
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-03-01T00:00:00.000Z",
+      },
+      kind: "workspace",
+      tag: `scope:workspace:${workspaceId}`,
     },
-    kind: "workspace",
-    tag: `scope:workspace:${workspaceId}`,
-  }],
+  ],
   knownRepositoryIds: [currentRepo, "github.com/dudong2/scope-sibling"],
   workspaceRepositoryIds: [currentRepo, "github.com/dudong2/scope-sibling"],
 };
 
 const timestamp = "2026-01-05T12:00:00.000Z";
-await provider.enqueueTurn(scope, {
-  sessionId: "acceptance-correction-04-late-backfill",
-  turnId: "historical-alpha04",
-  harness: "test",
-  timestamp,
-},
-"Historical correction: OrchestratorTestSetting04 used package alpha04 on January 5, 2026, before it later changed to beta04 and gamma04.",
-"Recorded the late-arriving January event: OrchestratorTestSetting04 used alpha04 on 2026-01-05.");
+await provider.enqueueTurn(
+  scope,
+  {
+    sessionId: "acceptance-correction-04-late-backfill",
+    turnId: "historical-alpha04",
+    harness: "test",
+    timestamp,
+  },
+  "Historical correction: OrchestratorTestSetting04 used package alpha04 on January 5, 2026, before it later changed to beta04 and gamma04.",
+  "Recorded the late-arriving January event: OrchestratorTestSetting04 used alpha04 on 2026-01-05.",
+);
 const drain = await outbox.drain(client, { maxJobs: 1 });
-if (drain.completed !== 1) throw new Error(`repair retain did not complete: ${JSON.stringify(drain)}`);
+if (drain.completed !== 1)
+  throw new Error(`repair retain did not complete: ${JSON.stringify(drain)}`);
 
 const consolidation = await client.triggerConsolidation(provider.bankId());
-if (typeof consolidation.operation_id === "string") await waitForOperation(consolidation.operation_id, 300_000);
+if (typeof consolidation.operation_id === "string")
+  await waitForOperation(consolidation.operation_id, 300_000);
 
 const repaired = [];
 for (let run = 1; run <= 2; run++) {
@@ -84,7 +94,10 @@ for (let run = 1; run <= 2; run++) {
     "What package did OrchestratorTestSetting04 use in January 2026?",
     scope,
   );
-  const text = outcome.memories.map((memory) => memory.text).join("\n").toLowerCase();
+  const text = outcome.memories
+    .map((memory) => memory.text)
+    .join("\n")
+    .toLowerCase();
   repaired.push({
     name: "january-04",
     query: "What package did OrchestratorTestSetting04 use in January 2026?",
@@ -97,7 +110,8 @@ for (let run = 1; run <= 2; run++) {
     scopes: outcome.plan.tags,
   });
 }
-if (repaired.some((item) => !item.ok)) throw new Error(`repair queries failed: ${JSON.stringify(repaired)}`);
+if (repaired.some((item) => !item.ok))
+  throw new Error(`repair queries failed: ${JSON.stringify(repaired)}`);
 
 const report = parseJson<{
   results: Array<Record<string, unknown>>;
@@ -106,8 +120,11 @@ const report = parseJson<{
 }>(await readFile(reportPath, "utf8"), "shadow acceptance report");
 const initialFailures = report.failures;
 for (const repair of repaired) {
-  const index = report.results.findIndex((item) => item.name === repair.name && item.run === repair.run);
-  if (index < 0) throw new Error(`original failed query not found for run ${repair.run}`);
+  const index = report.results.findIndex(
+    (item) => item.name === repair.name && item.run === repair.run,
+  );
+  if (index < 0)
+    throw new Error(`original failed query not found for run ${repair.run}`);
   report.results[index] = repair;
 }
 const durations = report.results.map((item) => Number(item.durationMs));
@@ -125,23 +142,34 @@ Object.assign(report, {
   failures: report.results.filter((item) => item.ok !== true),
 });
 const temporary = `${reportPath}.tmp-${process.pid}`;
-await writeFile(temporary, `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 });
+await writeFile(temporary, `${JSON.stringify(report, null, 2)}\n`, {
+  mode: 0o600,
+});
 await rename(temporary, reportPath);
-console.log(JSON.stringify({
-  drain,
-  repairedQueries: repaired.length,
-  successfulQueries: report.successfulQueries,
-  failedQueries: report.failedQueries,
-  p95Ms: Math.round(Number(report.p95Ms)),
-}));
+console.log(
+  JSON.stringify({
+    drain,
+    repairedQueries: repaired.length,
+    successfulQueries: report.successfulQueries,
+    failedQueries: report.failedQueries,
+    p95Ms: Math.round(Number(report.p95Ms)),
+  }),
+);
 
-async function waitForOperation(operationId: string, timeoutMs: number): Promise<void> {
+async function waitForOperation(
+  operationId: string,
+  timeoutMs: number,
+): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const operation = await client.operationStatus(provider.bankId(), operationId);
+    const operation = await client.operationStatus(
+      provider.bankId(),
+      operationId,
+    );
     const status = operation.status.toLowerCase();
     if (status === "completed") return;
-    if (status === "failed" || status === "cancelled") throw new Error(`operation ${status}: ${operationId}`);
+    if (status === "failed" || status === "cancelled")
+      throw new Error(`operation ${status}: ${operationId}`);
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
   throw new Error(`operation timed out: ${operationId}`);
@@ -149,5 +177,7 @@ async function waitForOperation(operationId: string, timeoutMs: number): Promise
 
 function percentile(values: number[], p: number): number {
   const sorted = [...values].sort((a, b) => a - b);
-  return sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * p) - 1)] ?? 0;
+  return (
+    sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * p) - 1)] ?? 0
+  );
 }

@@ -36,8 +36,9 @@ function nodeId(response: Record<string, unknown>): string {
     typeof node === "object" &&
     "id" in node &&
     typeof node.id === "string"
-  )
+  ) {
     return node.id;
+  }
   throw new Error("Hindsight knowledge API response has no node id");
 }
 
@@ -66,10 +67,7 @@ async function ensureFolder(
     };
   const response = await api.createKnowledgeFolder(
     bankId,
-    {
-      name,
-      ...(parentId ? { parent_id: parentId } : {}),
-    },
+    { name, ...(parentId ? { parent_id: parentId } : {}) },
     signal,
   );
   return { id: nodeId(response), children: [], created: true };
@@ -107,28 +105,27 @@ export async function ensureKnowledgeViews(
   const tree = await api.knowledgeTree(bankId, signal);
   let createdFolders = 0;
   let createdPages = 0;
-
-  const shared = await ensureFolder(
+  const root = await ensureFolder(
     api,
     bankId,
     tree.roots,
-    "Coding Workspaces",
+    "Coding Projects",
     undefined,
     signal,
   );
-  if (shared.created) createdFolders++;
+  if (root.created) createdFolders++;
 
   if (scope.kind === "global") {
     if (
       await ensurePage(
         api,
         bankId,
-        shared.children,
+        root.children,
         {
           name: "Global knowledge",
           source_query:
-            "Maintain a concise current overview of reusable general knowledge, conventions, decisions, corrections, and durable lessons shared across every coding workspace.",
-          parent_id: shared.id,
+            "Maintain a concise current overview of reusable general knowledge, conventions, decisions, corrections, and durable lessons shared across every coding scope.",
+          parent_id: root.id,
           tags: [GLOBAL_SCOPE_TAG],
           max_tokens: 2_048,
           trigger: pageTrigger(),
@@ -140,62 +137,47 @@ export async function ensureKnowledgeViews(
     return { createdFolders, createdPages };
   }
 
-  const inheritedLayers = scope.ancestors.reduceRight<typeof scope.ancestors>(
-    (layers, layer) => {
-      if (layer.kind !== "global") layers.push(layer);
-      return layers;
-    },
-    [],
+  if (!scope.projectId || !scope.projectName) {
+    throw new Error(`scope has no project: ${scope.scopeId}`);
+  }
+  const project = await ensureFolder(
+    api,
+    bankId,
+    root.children,
+    `${scope.projectName} [${scope.projectId}]`,
+    root.id,
+    signal,
   );
-  const layers = [
-    ...inheritedLayers,
-    {
-      root: scope.workspaceRoot,
-      markerPath: scope.markerPath,
-      marker: scope.marker,
-      kind: scope.kind,
-      tag: scope.scopeTag,
-      ...(scope.repositoryId ? { repositoryId: scope.repositoryId } : {}),
-    },
-  ];
-  let siblings = shared.children;
-  let parentId = shared.id;
-  for (const layer of layers) {
-    const folderName = `${layer.marker.displayName} [${layer.marker.workspaceId}]`;
-    const folder = await ensureFolder(
+  if (project.created) createdFolders++;
+  const scopeFolder = await ensureFolder(
+    api,
+    bankId,
+    project.children,
+    `${scope.scopeName} [${scope.scopeId}]`,
+    project.id,
+    signal,
+  );
+  if (scopeFolder.created) createdFolders++;
+  if (
+    await ensurePage(
       api,
       bankId,
-      siblings,
-      folderName,
-      parentId,
+      scopeFolder.children,
+      {
+        name: scope.repositoryId
+          ? `Repository: ${scope.repositoryId.split("/").slice(-2).join("/")}`
+          : "Scope overview",
+        source_query:
+          "Maintain a concise current scope overview covering architecture, conventions, decisions, pitfalls, corrections, and active initiatives. Explain temporal changes rather than silently replacing history.",
+        parent_id: scopeFolder.id,
+        tags: [scope.scopeTag],
+        max_tokens: 2_048,
+        trigger: pageTrigger(),
+      },
       signal,
-    );
-    if (folder.created) createdFolders++;
-    const repository = layer.kind === "repository" && layer.repositoryId;
-    if (
-      await ensurePage(
-        api,
-        bankId,
-        folder.children,
-        {
-          name: repository
-            ? `Repository: ${repository.split("/").slice(-2).join("/")}`
-            : "Workspace overview",
-          source_query: repository
-            ? "Maintain a concise current repository overview covering architecture, conventions, decisions, pitfalls, corrections, and active initiatives. Explain temporal changes rather than silently replacing history."
-            : "Maintain a concise current overview of shared architecture, conventions, decisions, corrections, and cross-repository dependencies for this workspace. Preserve important temporal changes.",
-          parent_id: folder.id,
-          tags: [layer.tag],
-          max_tokens: 2_048,
-          trigger: pageTrigger(),
-        },
-        signal,
-      )
     )
-      createdPages++;
-    siblings = folder.children;
-    parentId = folder.id;
-  }
+  )
+    createdPages++;
 
   return { createdFolders, createdPages };
 }

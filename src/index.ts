@@ -17,8 +17,14 @@ import {
   type RecallOutcome,
 } from "./hindsight/provider.js";
 import { registerLongMemoryTool } from "./hindsight/tools.js";
+import {
+  ensureHermesScopeStore,
+  HERMES_PROJECT_RESOLVER_EVENT,
+  type HermesProjectResolutionRequest,
+} from "./hermes.js";
 import { enqueueProjectMemoryMirror } from "./mirror.js";
-import { rebuildMarkersFromScopeIndex } from "./scope/marker.js";
+import { loadScopeCatalog, qualifiedScopeName } from "./scope/catalog.js";
+import { onboardScope } from "./scope/onboarding.js";
 import {
   resolveScope,
   ScopeBoundaryError,
@@ -107,17 +113,11 @@ function formatMemoryContext(
 }
 
 function describeScope(scope: ResolvedScope | null): string {
-  if (!scope) return "unresolved";
-  const hierarchy = scope.ancestors
-    .reduceRight<string[]>((names, ancestor) => {
-      names.push(ancestor.marker.displayName);
-      return names;
-    }, [])
-    .concat(scope.marker.displayName)
-    .join(" / ");
-  return scope.repositoryId
-    ? `${hierarchy} (${scope.repositoryId})`
-    : hierarchy;
+  if (!scope) return "memory-disabled";
+  const name = scope.projectName
+    ? `${scope.projectName}/${scope.scopeName}`
+    : scope.scopeName;
+  return scope.repositoryId ? `${name} (${scope.repositoryId})` : name;
 }
 
 export function createMemoryOrchestratorExtension(
@@ -163,9 +163,20 @@ export function createMemoryOrchestratorExtension(
     let activeDrain: Promise<void> | null = null;
     let activeDrainController: AbortController | null = null;
 
-    const ensureScope = async (cwd: string): Promise<ResolvedScope | null> => {
+    const ensureScope = async (
+      cwd: string,
+      ctx?: ExtensionContext,
+    ): Promise<ResolvedScope | null> => {
       if (scopeResolved && scopeCwd === cwd) return currentScope;
       currentScope = await scopeResolver(cwd);
+      if (
+        !currentScope &&
+        ctx &&
+        typeof ctx.ui?.select === "function" &&
+        !dependencies.scopeResolver
+      ) {
+        currentScope = await onboardScope(ctx, config);
+      }
       scopeCwd = cwd;
       scopeResolved = true;
       return currentScope;
@@ -173,16 +184,15 @@ export function createMemoryOrchestratorExtension(
 
     const startRecall = (
       prompt: string,
-      cwd: string,
-      signal?: AbortSignal,
+      ctx: ExtensionContext,
     ): PendingRecall => {
       const recall: PendingRecall = {
         prompt,
-        cwd,
-        promise: ensureScope(cwd).then(async (scope) => ({
+        cwd: ctx.cwd,
+        promise: ensureScope(ctx.cwd, ctx).then(async (scope) => ({
           scope,
           outcome: scope
-            ? await provider.recall(prompt, scope, { signal })
+            ? await provider.recall(prompt, scope, { signal: ctx.signal })
             : null,
         })),
       };
@@ -214,7 +224,7 @@ export function createMemoryOrchestratorExtension(
       description:
         "Show scoped memory mode, bank, scope, and durable outbox state.",
       handler: async (_args, ctx) => {
-        const scope = await ensureScope(ctx.cwd);
+        const scope = await ensureScope(ctx.cwd, ctx);
         const counts = await provider.counts();
         ctx.ui.notify(
           `pi-memory-orchestrator: mode=${config.mode}, harness=${config.harness}, bank=${provider.bankId()}, scope=${describeScope(scope)}, outbox=${JSON.stringify(counts)}`,
@@ -226,107 +236,49 @@ export function createMemoryOrchestratorExtension(
     const unavailableScopeMessage =
       "Long-term project memory scope could not be resolved from this filesystem location.";
 
-    pi.registerCommand("memory-orchestrator-recall", {
-      description:
-        "Run a scoped Hindsight recall without enabling automatic context injection.",
+    pi.registerCommand("memory-find", {
+      description: "Find registered memory Projects and Scopes by name.",
       handler: async (args, ctx) => {
-        const query = args.trim();
-        if (!query) {
-          ctx.ui.notify(
-            "Usage: /memory-orchestrator-recall <query>",
-            "warning",
+        const query = args.trim().toLocaleLowerCase("en-US");
+        const catalog = await loadScopeCatalog(config.dataDir);
+        const projects = Object.values(catalog.projects).filter(
+          (project) =>
+            !query ||
+            [project.name, ...project.aliases].some((name) =>
+              name.toLocaleLowerCase("en-US").includes(query),
+            ),
+        );
+        const scopes = Object.values(catalog.scopes).filter((scope) => {
+          const qualified = qualifiedScopeName(catalog, scope);
+          return (
+            !query ||
+            [qualified, scope.name, ...scope.aliases].some((name) =>
+              name.toLocaleLowerCase("en-US").includes(query),
+            )
           );
-          return;
-        }
-        const scope = await ensureScope(ctx.cwd);
-        if (!scope) {
-          ctx.ui.notify(unavailableScopeMessage, "warning");
-          return;
-        }
-        const outcome = await provider.recall(query, scope);
-        if (outcome.error) {
-          ctx.ui.notify(`Scoped recall failed: ${outcome.error}`, "warning");
-          return;
-        }
-        const text = outcome.memories.length
-          ? outcome.memories
-              .map((memory, index) => `${index + 1}. ${memory.text}`)
-              .join("\n\n")
-          : "No relevant memories found.";
-        ctx.ui.notify(text, "info");
-      },
-    });
-
-    pi.registerCommand("memory-orchestrator-retain", {
-      description:
-        "Store an explicit scoped memory; prefix with 'workspace ' to use workspace scope.",
-      handler: async (args, ctx) => {
-        const trimmed = args.trim();
-        const workspace = trimmed.startsWith("workspace ");
-        const content = workspace
-          ? trimmed.slice("workspace ".length).trim()
-          : trimmed;
-        if (!content) {
-          ctx.ui.notify(
-            "Usage: /memory-orchestrator-retain [workspace] <content>",
-            "warning",
-          );
-          return;
-        }
-        const scope = await ensureScope(ctx.cwd);
-        if (!scope) {
-          ctx.ui.notify(unavailableScopeMessage, "warning");
-          return;
-        }
-        await provider.enqueueExplicit(scope, {
-          identity: `command:${config.harness}:${ctx.sessionManager.getSessionId()}:${clock()}`,
-          content,
-          target: workspace ? "workspace" : "current",
         });
-        const result = await provider.drain(ctx.signal, 1);
+        const lines = [
+          ...projects.map((project) => `Project: ${project.name}`),
+          ...scopes.map(
+            (scope) => `Scope: ${qualifiedScopeName(catalog, scope)}`,
+          ),
+        ];
         ctx.ui.notify(
-          `Long-term memory retain: ${JSON.stringify(result)}`,
-          result.completed === 1 ? "info" : "warning",
+          lines.length
+            ? lines.join("\n")
+            : "일치하는 Project 또는 Scope가 없습니다.",
+          "info",
         );
       },
     });
 
-    pi.registerCommand("memory-orchestrator-pages", {
-      description:
-        "Ensure scope-filtered Hindsight Knowledge Page views exist.",
-      handler: async (_args, ctx) => {
-        const scope = await ensureScope(ctx.cwd);
-        if (!scope) {
-          ctx.ui.notify(unavailableScopeMessage, "warning");
-          return;
-        }
-        const result = await provider.ensureKnowledgeViews(scope);
-        ctx.ui.notify(`Knowledge views: ${JSON.stringify(result)}`, "info");
-      },
-    });
-
-    pi.registerCommand("memory-orchestrator-drain", {
-      description: "Retry durable long-term memory writes now.",
-      handler: async (_args, ctx) => {
-        const result = await provider.drain(undefined, 100);
-        ctx.ui.notify(
-          `Memory outbox: ${JSON.stringify(result)}`,
-          result.failed ? "warning" : "info",
-        );
-      },
-    });
-
-    pi.registerCommand("memory-orchestrator-rebuild-markers", {
-      description:
-        "Restore missing scope markers from the central scope index.",
-      handler: async (args, ctx) => {
-        const root = args.trim() || ctx.cwd;
-        const result = await rebuildMarkersFromScopeIndex(
-          join(config.dataDir, "scope-index.json"),
-          { root },
-        );
-        ctx.ui.notify(`Marker recovery: ${JSON.stringify(result)}`, "info");
-      },
+    pi.events.on(HERMES_PROJECT_RESOLVER_EVENT, (value) => {
+      const request = value as HermesProjectResolutionRequest;
+      request.respond(
+        ensureScope(request.ctx.cwd, request.ctx).then((scope) =>
+          scope ? ensureHermesScopeStore(scope) : null,
+        ),
+      );
     });
 
     if (config.mode === "active") {
@@ -341,10 +293,12 @@ export function createMemoryOrchestratorExtension(
       latestUserInput = "";
       pendingRecall = null;
       turnCounter = 0;
-      currentScope = null;
-      scopeCwd = "";
-      scopeResolved = false;
-      const scope = await ensureScope(ctx.cwd);
+      if (!(scopeResolved && scopeCwd === ctx.cwd)) {
+        currentScope = null;
+        scopeCwd = "";
+        scopeResolved = false;
+      }
+      const scope = await ensureScope(ctx.cwd, ctx);
       scheduleDrain(ctx);
       if (!scope) {
         ctx.ui.notify(unavailableScopeMessage, "warning");
@@ -362,7 +316,7 @@ export function createMemoryOrchestratorExtension(
       if (event.source === "extension") return;
       latestUserInput = event.text.trim();
       if (config.mode === "active" && latestUserInput)
-        startRecall(latestUserInput, ctx.cwd, ctx.signal);
+        startRecall(latestUserInput, ctx);
     });
 
     pi.on("before_agent_start", async (event, ctx) => {
@@ -372,7 +326,7 @@ export function createMemoryOrchestratorExtension(
       const recall =
         pendingRecall?.prompt === prompt && pendingRecall.cwd === ctx.cwd
           ? pendingRecall
-          : startRecall(prompt, ctx.cwd, ctx.signal);
+          : startRecall(prompt, ctx);
       const { outcome } = await recall.promise;
       if (!outcome || outcome.error || !outcome.memories.length) return;
       const block = formatMemoryContext(outcome.memories, event.systemPrompt);
@@ -382,7 +336,7 @@ export function createMemoryOrchestratorExtension(
 
     pi.on("tool_result", async (event, ctx) => {
       try {
-        const scope = await ensureScope(ctx.cwd);
+        const scope = await ensureScope(ctx.cwd, ctx);
         if (scope && (await enqueueProjectMemoryMirror(event, provider, scope)))
           scheduleDrain(ctx);
       } catch (error) {
@@ -397,7 +351,7 @@ export function createMemoryOrchestratorExtension(
       const user = latestUserInput.trim();
       const assistant = extractText(event.message);
       if (!user || !assistant) return;
-      const scope = await ensureScope(ctx.cwd);
+      const scope = await ensureScope(ctx.cwd, ctx);
       if (!scope) return;
       const sessionId = ctx.sessionManager.getSessionId();
       const rawTimestamp = (event.message as Textish).timestamp;

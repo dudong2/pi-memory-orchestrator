@@ -1,0 +1,100 @@
+--- a/src/index.ts
++++ b/src/index.ts
+@@ -57 +57 @@
+-import { detectProject, detectProjectSkills } from "./project.js";
++import { detectProject, detectProjectSkills, type ProjectInfo } from "./project.js";
+@@ -89,0 +90,23 @@
++}
++
++const EXTERNAL_PROJECT_RESOLVER_EVENT = "pi-hermes-memory:resolve-project";
++
++type ExternalProjectResolutionRequest = {
++  ctx: ExtensionContext;
++  respond: (result: ProjectInfo | null | Promise<ProjectInfo | null>) => void;
++};
++
++async function resolveExternalProject(
++  pi: ExtensionAPI,
++  ctx: ExtensionContext,
++): Promise<ProjectInfo> {
++  const responses: Array<Promise<ProjectInfo | null>> = [];
++  const request: ExternalProjectResolutionRequest = {
++    ctx,
++    respond(result) {
++      responses.push(Promise.resolve(result));
++    },
++  };
++  pi.events.emit(EXTERNAL_PROJECT_RESOLVER_EVENT, request);
++  if (!responses.length) return { name: null, memoryDir: null };
++  return (await responses[0]) ?? { name: null, memoryDir: null };
+@@ -171 +194,8 @@
+-    const nextProject = detectProject(config.projectsMemoryDir, cwd);
++    const nextProject = config.projectResolutionMode === "external"
++      ? await resolveExternalProject(
++          pi,
++          sessionContext?.cwd === cwd
++            ? sessionContext
++            : ({ cwd } as ExtensionContext),
++        )
++      : detectProject(config.projectsMemoryDir, cwd);
+--- a/src/types.ts
++++ b/src/types.ts
+@@ -57,0 +58,2 @@
++  /** Resolve project memory through an inter-extension provider instead of cwd names. Default: legacy */
++  projectResolutionMode?: "legacy" | "external";
+--- a/src/config.ts
++++ b/src/config.ts
+@@ -71,0 +72 @@
++  projectResolutionMode: "legacy",
+@@ -171,0 +173,3 @@
++      if (parsed.projectResolutionMode === "legacy" || parsed.projectResolutionMode === "external") {
++        config.projectResolutionMode = parsed.projectResolutionMode;
++      }
+--- a/src/handlers/sync-markdown-memories.ts
++++ b/src/handlers/sync-markdown-memories.ts
+@@ -43,0 +44,16 @@
++}
++
++const SCOPE_STORE_FILE = ".pi-memory-scope-store.json";
++
++function projectIdentity(projectsRoot: string, directoryName: string): string {
++  try {
++    const parsed = JSON.parse(
++      fs.readFileSync(path.join(projectsRoot, directoryName, SCOPE_STORE_FILE), "utf8"),
++    ) as { qualifiedName?: unknown };
++    if (typeof parsed.qualifiedName === "string" && parsed.qualifiedName.trim()) {
++      return parsed.qualifiedName.trim();
++    }
++  } catch (error) {
++    if ((error as NodeJS.ErrnoException).code !== "ENOENT" && !(error instanceof SyntaxError)) throw error;
++  }
++  return directoryName;
+@@ -55 +71 @@
+-        projects.set(name, memoryFile);
++        projects.set(projectIdentity(projectsRoot, name), memoryFile);
+--- a/src/handlers/switch-project.ts
++++ b/src/handlers/switch-project.ts
+@@ -25 +25 @@
+-      let projects: string[] = [];
++      let projects: Array<{ directory: string; name: string }> = [];
+@@ -32 +32,10 @@
+-            projects.push(entry.name);
++            let name = entry.name;
++            try {
++              const parsed = JSON.parse(
++                await fs.readFile(path.join(projectsDir, entry.name, ".pi-memory-scope-store.json"), "utf8"),
++              ) as { qualifiedName?: unknown };
++              if (typeof parsed.qualifiedName === "string" && parsed.qualifiedName.trim()) {
++                name = parsed.qualifiedName.trim();
++              }
++            } catch { /* legacy project directory */ }
++            projects.push({ directory: entry.name, name });
+@@ -56 +65 @@
+-      for (const proj of projects.sort()) {
++      for (const project of projects.sort((a, b) => a.name.localeCompare(b.name))) {
+@@ -60 +69 @@
+-          const raw = await fs.readFile(path.join(projectsDir, proj, "MEMORY.md"), "utf-8");
++          const raw = await fs.readFile(path.join(projectsDir, project.directory, "MEMORY.md"), "utf-8");
+@@ -64 +73 @@
+-        lines.push(`  📁 ${proj} (${entryCount} ${entryCount === 1 ? "entry" : "entries"})`);
++        lines.push(`  📁 ${project.name} (${entryCount} ${entryCount === 1 ? "entry" : "entries"})`);

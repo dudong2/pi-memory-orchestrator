@@ -8,30 +8,8 @@ import type {
   KnowledgeNode,
   KnowledgePageRequest,
 } from "../src/hindsight/client.js";
-import type { ResolvedScope } from "../src/scope/resolver.js";
 import { GLOBAL_SCOPE_TAG } from "../src/scope/query.js";
-
-const scope: ResolvedScope = {
-  workspaceRoot: "/tmp/product",
-  markerPath: "/tmp/product/.pi-memory-scope.json",
-  marker: {
-    version: 1,
-    workspaceId: "ws_11111111-1111-4111-8111-111111111111",
-    displayName: "product",
-    repositories: ["github.com/dudong2/frontend"],
-    createdAt: "2026-09-14T00:00:00.000Z",
-    updatedAt: "2026-09-14T00:00:00.000Z",
-  },
-  workspaceTag: "scope:workspace:ws_11111111-1111-4111-8111-111111111111",
-  repositoryId: "github.com/dudong2/frontend",
-  repositoryTag: "scope:repo:github.com/dudong2/frontend",
-  git: null,
-  scopeTag: "scope:repo:github.com/dudong2/frontend",
-  kind: "repository",
-  ancestors: [],
-  knownRepositoryIds: ["github.com/dudong2/frontend"],
-  workspaceRepositoryIds: ["github.com/dudong2/frontend"],
-};
+import { globalScope, scope } from "./fixtures.js";
 
 class FakeKnowledgeApi implements KnowledgeApi {
   roots: KnowledgeNode[] = [];
@@ -85,7 +63,7 @@ class FakeKnowledgeApi implements KnowledgeApi {
 test("a repository marker creates one strictly filtered knowledge page", async () => {
   const api = new FakeKnowledgeApi();
   assert.deepEqual(await ensureKnowledgeViews(api, "bank", scope), {
-    createdFolders: 2,
+    createdFolders: 3,
     createdPages: 1,
   });
   assert.deepEqual(await ensureKnowledgeViews(api, "bank", scope), {
@@ -106,27 +84,12 @@ test("a repository marker creates one strictly filtered knowledge page", async (
 
 test("a global marker creates one shared knowledge page", async () => {
   const api = new FakeKnowledgeApi();
-  const globalScope: ResolvedScope = {
-    ...scope,
-    marker: {
-      ...scope.marker,
-      scope: "global",
-      displayName: "scratchpad",
-      repositories: [],
-    },
-    repositoryId: undefined,
-    repositoryTag: undefined,
-    scopeTag: GLOBAL_SCOPE_TAG,
-    kind: "global",
-    ancestors: [],
-    knownRepositoryIds: [],
-    workspaceRepositoryIds: [],
-  };
-  assert.deepEqual(await ensureKnowledgeViews(api, "bank", globalScope), {
+  const global = globalScope();
+  assert.deepEqual(await ensureKnowledgeViews(api, "bank", global), {
     createdFolders: 1,
     createdPages: 1,
   });
-  assert.deepEqual(await ensureKnowledgeViews(api, "bank", globalScope), {
+  assert.deepEqual(await ensureKnowledgeViews(api, "bank", global), {
     createdFolders: 0,
     createdPages: 0,
   });

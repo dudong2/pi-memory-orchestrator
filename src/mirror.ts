@@ -18,13 +18,16 @@ export interface ProjectMemoryMirror {
 
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
+    ? (value as Record<string, unknown>)
     : null;
 }
 
-export function projectMemoryMirrorFromResult(event: ToolResultEventLike): ProjectMemoryMirror | null {
+export function projectMemoryMirrorFromResult(
+  event: ToolResultEventLike,
+): ProjectMemoryMirror | null {
   if (event.isError) return null;
-  if (event.toolName !== "memory_add" && event.toolName !== "memory_replace") return null;
+  if (event.toolName !== "memory_add" && event.toolName !== "memory_replace")
+    return null;
   const input = record(event.input);
   const details = record(event.details);
   if (!input || !details || details.success !== true) return null;
@@ -35,13 +38,20 @@ export function projectMemoryMirrorFromResult(event: ToolResultEventLike): Proje
   if (action === "add") {
     return { action, content, identity: `bounded-memory:${event.toolCallId}` };
   }
-  const oldText = typeof input.old_text === "string" ? input.old_text.trim() : "";
+  const oldText =
+    typeof input.old_text === "string" ? input.old_text.trim() : "";
   if (!oldText) return null;
-  return { action, content, oldText, identity: `bounded-memory:${event.toolCallId}` };
+  return {
+    action,
+    content,
+    oldText,
+    identity: `bounded-memory:${event.toolCallId}`,
+  };
 }
 
 export function formatProjectMemoryMirror(mirror: ProjectMemoryMirror): string {
-  if (mirror.action === "add") return `Project working-memory fact added: ${mirror.content}`;
+  if (mirror.action === "add")
+    return `Project working-memory fact added: ${mirror.content}`;
   return [
     "Project working-memory fact corrected.",
     `Previous text: ${mirror.oldText}`,
@@ -60,7 +70,6 @@ export async function enqueueProjectMemoryMirror(
   await provider.enqueueExplicit(scope, {
     identity: mirror.identity,
     content: formatProjectMemoryMirror(mirror),
-    target: "current",
   });
   return true;
 }

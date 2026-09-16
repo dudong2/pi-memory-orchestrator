@@ -5,28 +5,7 @@ import { DEFAULT_CONFIG } from "../src/config.js";
 import { createMemoryOrchestratorExtension } from "../src/index.js";
 import type { ScopedHindsightProvider } from "../src/hindsight/provider.js";
 import type { ResolvedScope } from "../src/scope/resolver.js";
-
-const scope: ResolvedScope = {
-  workspaceRoot: "/tmp/project",
-  markerPath: "/tmp/project/.pi-memory-scope.json",
-  marker: {
-    version: 1,
-    workspaceId: "ws_11111111-1111-4111-8111-111111111111",
-    displayName: "project",
-    repositories: ["github.com/dudong2/project"],
-    createdAt: "2026-09-14T00:00:00.000Z",
-    updatedAt: "2026-09-14T00:00:00.000Z",
-  },
-  workspaceTag: "scope:workspace:ws_11111111-1111-4111-8111-111111111111",
-  repositoryId: "github.com/dudong2/project",
-  repositoryTag: "scope:repo:github.com/dudong2/project",
-  git: null,
-  scopeTag: "scope:repo:github.com/dudong2/project",
-  kind: "repository",
-  ancestors: [],
-  knownRepositoryIds: ["github.com/dudong2/project"],
-  workspaceRepositoryIds: ["github.com/dudong2/project"],
-};
+import { scope } from "./fixtures.js";
 
 function harness(
   mode: "shadow" | "active",
@@ -35,7 +14,19 @@ function harness(
   const handlers = new Map<string, Function[]>();
   const tools: unknown[] = [];
   const commands = new Map<string, unknown>();
+  const extensionEvents = new Map<string, Function[]>();
   const pi = {
+    events: {
+      on(name: string, handler: Function) {
+        extensionEvents.set(name, [
+          ...(extensionEvents.get(name) ?? []),
+          handler,
+        ]);
+      },
+      emit(name: string, value: unknown) {
+        for (const handler of extensionEvents.get(name) ?? []) handler(value);
+      },
+    },
     on(name: string, handler: Function) {
       handlers.set(name, [...(handlers.get(name) ?? []), handler]);
     },
@@ -62,6 +53,7 @@ function harness(
         plan: {
           tags: [scope.workspaceTag],
           tagGroups: [],
+          expandedScopes: [],
           expandedRepositories: [],
           workspaceWide: false,
         },
@@ -112,7 +104,7 @@ function context(
 test("shadow mode captures turns but exposes no tool or automatic recall", async () => {
   const runtime = harness("shadow");
   assert.equal(runtime.tools.length, 0);
-  assert.ok(runtime.commands.has("memory-orchestrator-recall"));
+  assert.ok(runtime.commands.has("memory-find"));
   await runtime.handlers.get("session_start")?.[0]?.({}, context());
   await runtime.handlers.get("input")?.[0]?.(
     { text: "question", source: "interactive" },

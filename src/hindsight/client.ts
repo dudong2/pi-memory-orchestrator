@@ -304,6 +304,19 @@ export class HindsightClient {
     );
   }
 
+  async deleteKnowledgeNode(
+    bankId: string,
+    nodeId: string,
+    signal?: AbortSignal,
+  ): Promise<Record<string, unknown>> {
+    return this.#request(
+      "DELETE",
+      `/v1/default/banks/${encodeURIComponent(bankId)}/knowledge-base/nodes/${encodeURIComponent(nodeId)}`,
+      undefined,
+      signal,
+    );
+  }
+
   async updateMemory(
     bankId: string,
     memoryId: string,

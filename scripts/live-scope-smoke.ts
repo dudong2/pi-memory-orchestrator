@@ -8,7 +8,11 @@ const connection = parseJson<{ apiUrl: string; apiToken: string }>(
   readFileSync(`${process.env.HOME}/.hindsight/coding-agent.json`, "utf8"),
   "Hindsight connection",
 );
-const client = new HindsightClient({ apiUrl: connection.apiUrl, apiToken: connection.apiToken, requestTimeoutMs: 30_000 });
+const client = new HindsightClient({
+  apiUrl: connection.apiUrl,
+  apiToken: connection.apiToken,
+  requestTimeoutMs: 30_000,
+});
 const bankId = "coding-agent::dudong2::shadow";
 const token = `scopeprobe-${randomUUID()}`;
 const workspaceTag = `scope:workspace:${token}`;
@@ -22,7 +26,9 @@ function item(label: string, tag?: string): RetainItem {
     timestamp: now,
     context: "scope filter integration test",
     document_id: `${token}-${label}`,
-    ...(tag ? { tags: [tag], observation_scopes: [[tag]] } : { observation_scopes: "shared" }),
+    ...(tag
+      ? { tags: [tag], observation_scopes: [[tag]] }
+      : { observation_scopes: "shared" }),
     metadata: { source: "scope-filter-smoke", label },
   };
 }
@@ -43,7 +49,8 @@ const deadline = Date.now() + 180_000;
 while (Date.now() < deadline) {
   const status = await client.operationStatus(bankId, operationId);
   if (status.status === "completed") break;
-  if (status.status === "failed" || status.status === "cancelled") throw new Error(`retain ${status.status}`);
+  if (status.status === "failed" || status.status === "cancelled")
+    throw new Error(`retain ${status.status}`);
   await new Promise((resolve) => setTimeout(resolve, 500));
 }
 if (Date.now() >= deadline) throw new Error("scope smoke retain timed out");
@@ -53,10 +60,14 @@ const response = await client.recall(bankId, {
   budget: "mid",
   max_tokens: 2_048,
   types: ["world", "experience", "observation"],
-  tag_groups: [{ or: [
-    { tags: [workspaceTag], match: "all_strict" },
-    { tags: [currentTag], match: "all_strict" },
-  ] }],
+  tag_groups: [
+    {
+      or: [
+        { tags: [workspaceTag], match: "all_strict" },
+        { tags: [currentTag], match: "all_strict" },
+      ],
+    },
+  ],
 });
 const text = response.results.map((memory) => memory.text).join("\n");
 const result = {
@@ -67,4 +78,9 @@ const result = {
   untaggedBlocked: !text.includes("untagged-blocked"),
 };
 console.log(JSON.stringify(result));
-if (!Object.values(result).every((value) => typeof value === "number" || value === true)) process.exitCode = 1;
+if (
+  !Object.values(result).every(
+    (value) => typeof value === "number" || value === true,
+  )
+)
+  process.exitCode = 1;

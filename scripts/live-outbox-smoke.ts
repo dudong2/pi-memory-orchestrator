@@ -16,13 +16,18 @@ const client = new HindsightClient({
   apiToken: connection.apiToken,
   requestTimeoutMs: 30_000,
 });
-const outbox = new RetainOutbox({ rootDir, operationTimeoutMs: 120_000, pollIntervalMs: 500 });
+const outbox = new RetainOutbox({
+  rootDir,
+  operationTimeoutMs: 120_000,
+  pollIntervalMs: 500,
+});
 const identity = `live-smoke:${new Date().toISOString()}`;
 await outbox.enqueue({
   identity,
   bankId: "coding-agent::dudong2::shadow",
   item: {
-    content: "The pi-memory-orchestrator live outbox probe verifies idempotent asynchronous retention.",
+    content:
+      "The pi-memory-orchestrator live outbox probe verifies idempotent asynchronous retention.",
     context: "integration smoke test",
     timestamp: new Date().toISOString(),
     document_id: `outbox-smoke-${identity}`,
@@ -34,4 +39,5 @@ await outbox.enqueue({
 const result = await outbox.drain(client);
 const counts = await outbox.counts();
 console.log(JSON.stringify({ result, counts }));
-if (result.completed !== 1 || counts.pending !== 0 || counts.processing !== 0) process.exitCode = 1;
+if (result.completed !== 1 || counts.pending !== 0 || counts.processing !== 0)
+  process.exitCode = 1;

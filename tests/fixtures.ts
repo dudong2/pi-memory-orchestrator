@@ -1,0 +1,114 @@
+import type { ResolvedScope, ScopeReference } from "../src/scope/resolver.js";
+
+const backend: ScopeReference = {
+  scopeId: "scope_backend",
+  scopeName: "backend",
+  qualifiedName: "product/backend",
+  aliases: [],
+  projectId: "project_product",
+  projectName: "product",
+  projectAliases: [],
+  memoryTag: "scope:id:scope_backend",
+  kind: "repository",
+  repositoryId: "github.com/dudong2/backend",
+};
+
+const frontend: ScopeReference = {
+  scopeId: "scope_frontend",
+  scopeName: "frontend",
+  qualifiedName: "product/frontend",
+  aliases: [],
+  projectId: "project_product",
+  projectName: "product",
+  projectAliases: [],
+  memoryTag: "scope:id:scope_frontend",
+  kind: "repository",
+  repositoryId: "github.com/dudong2/frontend",
+};
+
+const infrastructure: ScopeReference = {
+  scopeId: "scope_infrastructure",
+  scopeName: "infrastructure",
+  qualifiedName: "product/infrastructure",
+  aliases: ["infra"],
+  projectId: "project_product",
+  projectName: "product",
+  projectAliases: [],
+  memoryTag: "scope:id:scope_infrastructure",
+  kind: "repository",
+  repositoryId: "github.com/dudong2/infrastructure",
+};
+
+export const scope: ResolvedScope = {
+  workspaceRoot: "/work/product/frontend",
+  markerPath: "/work/product/frontend/.pi-memory-scope.json",
+  marker: {
+    version: 2,
+    scopeId: frontend.scopeId,
+    projectId: frontend.projectId,
+    scopeName: frontend.scopeName,
+    kind: "repository",
+    createdAt: "2026-09-14T00:00:00.000Z",
+    updatedAt: "2026-09-14T00:00:00.000Z",
+  },
+  scopeId: frontend.scopeId,
+  scopeName: frontend.scopeName,
+  projectId: frontend.projectId,
+  projectName: frontend.projectName,
+  legacyHermesNames: ["frontend"],
+  workspaceTag: frontend.memoryTag,
+  repositoryId: frontend.repositoryId,
+  repositoryTag: frontend.memoryTag,
+  git: null,
+  scopeTag: frontend.memoryTag,
+  kind: "repository",
+  ancestors: [],
+  knownRepositoryIds: [
+    backend.repositoryId!,
+    frontend.repositoryId!,
+    infrastructure.repositoryId!,
+  ],
+  workspaceRepositoryIds: [
+    backend.repositoryId!,
+    frontend.repositoryId!,
+    infrastructure.repositoryId!,
+  ],
+  knownScopes: [backend, frontend, infrastructure],
+  projectScopes: [backend, frontend, infrastructure],
+};
+
+export function globalScope(): ResolvedScope {
+  const global: ScopeReference = {
+    scopeId: "scope_global",
+    scopeName: "global",
+    qualifiedName: "global",
+    aliases: [],
+    projectAliases: [],
+    memoryTag: "scope:global",
+    kind: "global",
+  };
+  return {
+    workspaceRoot: "/work/scratchpad",
+    markerPath: "/work/scratchpad/.pi-memory-scope.json",
+    marker: {
+      version: 2,
+      scopeId: global.scopeId,
+      scopeName: global.scopeName,
+      kind: "global",
+      createdAt: "2026-09-14T00:00:00.000Z",
+      updatedAt: "2026-09-14T00:00:00.000Z",
+    },
+    scopeId: global.scopeId,
+    scopeName: global.scopeName,
+    legacyHermesNames: [],
+    workspaceTag: global.memoryTag,
+    git: null,
+    scopeTag: global.memoryTag,
+    kind: "global",
+    ancestors: [],
+    knownRepositoryIds: [],
+    workspaceRepositoryIds: [],
+    knownScopes: [global],
+    projectScopes: [],
+  };
+}

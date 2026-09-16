@@ -8,8 +8,16 @@ const backup = process.argv[2];
 if (!backup) throw new Error("usage: prepare-final-migration <backup-dir>");
 const migrationDir = join(backup, "migrations");
 const inventory = parseJson<{
-  documents: Array<{ bankId: string; documentId: string; action: string; scopeTag?: string }>;
-}>(await readFile(join(migrationDir, "inventory.json"), "utf8"), "migration inventory");
+  documents: Array<{
+    bankId: string;
+    documentId: string;
+    action: string;
+    scopeTag?: string;
+  }>;
+}>(
+  await readFile(join(migrationDir, "inventory.json"), "utf8"),
+  "migration inventory",
+);
 const archives: Record<string, string> = {
   "coding-agent::scratch": "coding-agent__scratch.zip",
   "coding-agent::memory": "coding-agent__memory.zip",
@@ -17,8 +25,13 @@ const archives: Record<string, string> = {
   "user-knowledge": "user-knowledge.zip",
 };
 const grouped = new Map<string, typeof inventory.documents>();
-for (const document of inventory.documents.filter((item) => item.action === "import")) {
-  if (!document.scopeTag) throw new Error(`import document has no scope: ${document.bankId}/${document.documentId}`);
+for (const document of inventory.documents.filter(
+  (item) => item.action === "import",
+)) {
+  if (!document.scopeTag)
+    throw new Error(
+      `import document has no scope: ${document.bankId}/${document.documentId}`,
+    );
   const key = `${document.bankId}\u0000${document.scopeTag}`;
   grouped.set(key, [...(grouped.get(key) ?? []), document]);
 }
@@ -40,5 +53,18 @@ for (const [key, documents] of grouped) {
   results.push({ bankId, scopeTag, outputArchive, result, verification });
 }
 const manifestPath = join(migrationDir, "final-import-batch.json");
-await writeFile(manifestPath, `${JSON.stringify({ version: 1, createdAt: new Date().toISOString(), targetBank: "coding-agent::dudong2", results }, null, 2)}\n`, { mode: 0o600 });
-console.log(JSON.stringify({ groups: results.length, documents: results.reduce((sum, item) => sum + item.verification.documentCount, 0), facts: results.reduce((sum, item) => sum + item.verification.factCount, 0) }));
+await writeFile(
+  manifestPath,
+  `${JSON.stringify({ version: 1, createdAt: new Date().toISOString(), targetBank: "coding-agent::dudong2", results }, null, 2)}\n`,
+  { mode: 0o600 },
+);
+console.log(
+  JSON.stringify({
+    groups: results.length,
+    documents: results.reduce(
+      (sum, item) => sum + item.verification.documentCount,
+      0,
+    ),
+    facts: results.reduce((sum, item) => sum + item.verification.factCount, 0),
+  }),
+);

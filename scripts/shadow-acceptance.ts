@@ -48,25 +48,34 @@ const scope: ResolvedScope = {
   git: null,
   scopeTag: `scope:repo:${currentRepo}`,
   kind: "repository",
-  ancestors: [{
-    root: "/acceptance",
-    markerPath: "/acceptance/.pi-memory-scope.json",
-    marker: {
-      version: 1,
-      workspaceId,
-      displayName: "acceptance-workspace",
-      repositories: [],
-      createdAt: "2026-01-01T00:00:00.000Z",
-      updatedAt: "2026-03-01T00:00:00.000Z",
+  ancestors: [
+    {
+      root: "/acceptance",
+      markerPath: "/acceptance/.pi-memory-scope.json",
+      marker: {
+        version: 1,
+        workspaceId,
+        displayName: "acceptance-workspace",
+        repositories: [],
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-03-01T00:00:00.000Z",
+      },
+      kind: "workspace",
+      tag: `scope:workspace:${workspaceId}`,
     },
-    kind: "workspace",
-    tag: `scope:workspace:${workspaceId}`,
-  }],
+  ],
   knownRepositoryIds: [currentRepo, siblingRepo],
   workspaceRepositoryIds: [currentRepo, siblingRepo],
 };
 
-const turns: Array<{ sessionId: string; turnId: string; timestamp: string; user: string; assistant: string; scope: ResolvedScope }> = [];
+const turns: Array<{
+  sessionId: string;
+  turnId: string;
+  timestamp: string;
+  user: string;
+  assistant: string;
+  scope: ResolvedScope;
+}> = [];
 for (let chain = 1; chain <= 10; chain++) {
   const id = String(chain).padStart(2, "0");
   for (const [stage, date, value] of [
@@ -131,15 +140,21 @@ for (let index = 1; index <= 5; index++) {
     scope: siblingScope,
   });
 }
-if (turns.length !== 50) throw new Error(`expected 50 turns, got ${turns.length}`);
+if (turns.length !== 50)
+  throw new Error(`expected 50 turns, got ${turns.length}`);
 
 for (const turn of turns) {
-  await provider.enqueueTurn(turn.scope, {
-    sessionId: turn.sessionId,
-    turnId: turn.turnId,
-    harness: "test",
-    timestamp: turn.timestamp,
-  }, turn.user, turn.assistant);
+  await provider.enqueueTurn(
+    turn.scope,
+    {
+      sessionId: turn.sessionId,
+      turnId: turn.turnId,
+      harness: "test",
+      timestamp: turn.timestamp,
+    },
+    turn.user,
+    turn.assistant,
+  );
 }
 
 let completed = 0;
@@ -155,50 +170,97 @@ while (Date.now() < drainDeadline) {
 }
 const outboxCounts = await outbox.counts();
 if (outboxCounts.pending || outboxCounts.processing || outboxCounts.failed) {
-  throw new Error(`outbox did not drain cleanly: ${JSON.stringify(outboxCounts)}`);
+  throw new Error(
+    `outbox did not drain cleanly: ${JSON.stringify(outboxCounts)}`,
+  );
 }
 
 const consolidation = await client.triggerConsolidation(provider.bankId());
-if (typeof consolidation.operation_id === "string") await waitForOperation(consolidation.operation_id, 10 * 60_000);
+if (typeof consolidation.operation_id === "string")
+  await waitForOperation(consolidation.operation_id, 10 * 60_000);
 
-const baseQueries: Array<{ name: string; query: string; expected?: string; forbidden?: string }> = [];
+const baseQueries: Array<{
+  name: string;
+  query: string;
+  expected?: string;
+  forbidden?: string;
+}> = [];
 for (let chain = 1; chain <= 10; chain++) {
   const id = String(chain).padStart(2, "0");
-  baseQueries.push({ name: `current-${id}`, query: `What package does OrchestratorTestSetting${id} currently use?`, expected: `gamma${id}` });
-  baseQueries.push({ name: `february-${id}`, query: `What package did OrchestratorTestSetting${id} use in February 2026?`, expected: `beta${id}` });
-  baseQueries.push({ name: `january-${id}`, query: `What package did OrchestratorTestSetting${id} use in January 2026?`, expected: `alpha${id}` });
+  baseQueries.push({
+    name: `current-${id}`,
+    query: `What package does OrchestratorTestSetting${id} currently use?`,
+    expected: `gamma${id}`,
+  });
+  baseQueries.push({
+    name: `february-${id}`,
+    query: `What package did OrchestratorTestSetting${id} use in February 2026?`,
+    expected: `beta${id}`,
+  });
+  baseQueries.push({
+    name: `january-${id}`,
+    query: `What package did OrchestratorTestSetting${id} use in January 2026?`,
+    expected: `alpha${id}`,
+  });
 }
 for (let index = 1; index <= 10; index++) {
   const id = String(index).padStart(2, "0");
-  baseQueries.push({ name: `workspace-${id}`, query: `What protocol does SharedWorkspaceRule${id} require?`, expected: `workspacevalue${id}` });
+  baseQueries.push({
+    name: `workspace-${id}`,
+    query: `What protocol does SharedWorkspaceRule${id} require?`,
+    expected: `workspacevalue${id}`,
+  });
 }
 for (let index = 1; index <= 5; index++) {
   const id = String(index).padStart(2, "0");
-  baseQueries.push({ name: `current-repo-${id}`, query: `What does CurrentRepoRule${id} use?`, expected: `currentvalue${id}`, forbidden: `siblingvalue${id}` });
-  baseQueries.push({ name: `sibling-repo-${id}`, query: `In scope-sibling, what does SiblingRepoRule${id} use?`, expected: `siblingvalue${id}` });
+  baseQueries.push({
+    name: `current-repo-${id}`,
+    query: `What does CurrentRepoRule${id} use?`,
+    expected: `currentvalue${id}`,
+    forbidden: `siblingvalue${id}`,
+  });
+  baseQueries.push({
+    name: `sibling-repo-${id}`,
+    query: `In scope-sibling, what does SiblingRepoRule${id} use?`,
+    expected: `siblingvalue${id}`,
+  });
 }
-if (baseQueries.length !== 50) throw new Error(`expected 50 base queries, got ${baseQueries.length}`);
-const queries = [...baseQueries, ...baseQueries].map((query, index) => ({ ...query, run: index < 50 ? 1 : 2 }));
+if (baseQueries.length !== 50)
+  throw new Error(`expected 50 base queries, got ${baseQueries.length}`);
+const queries = [...baseQueries, ...baseQueries].map((query, index) => ({
+  ...query,
+  run: index < 50 ? 1 : 2,
+}));
 
 const creditsBefore = await readCredits();
 const results: Array<Record<string, unknown>> = [];
 for (let index = 0; index < queries.length; index += 4) {
   const group = queries.slice(index, index + 4);
-  results.push(...await Promise.all(group.map(async (testCase) => {
-    const started = performance.now();
-    const outcome = await provider.recall(testCase.query, scope);
-    const text = outcome.memories.map((memory) => memory.text).join("\n").toLowerCase();
-    return {
-      ...testCase,
-      durationMs: performance.now() - started,
-      ok: !outcome.error
-        && (!testCase.expected || text.includes(testCase.expected.toLowerCase()))
-        && (!testCase.forbidden || !text.includes(testCase.forbidden.toLowerCase())),
-      count: outcome.memories.length,
-      error: outcome.error,
-      scopes: outcome.plan.tags,
-    };
-  })));
+  results.push(
+    ...(await Promise.all(
+      group.map(async (testCase) => {
+        const started = performance.now();
+        const outcome = await provider.recall(testCase.query, scope);
+        const text = outcome.memories
+          .map((memory) => memory.text)
+          .join("\n")
+          .toLowerCase();
+        return {
+          ...testCase,
+          durationMs: performance.now() - started,
+          ok:
+            !outcome.error &&
+            (!testCase.expected ||
+              text.includes(testCase.expected.toLowerCase())) &&
+            (!testCase.forbidden ||
+              !text.includes(testCase.forbidden.toLowerCase())),
+          count: outcome.memories.length,
+          error: outcome.error,
+          scopes: outcome.plan.tags,
+        };
+      }),
+    )),
+  );
 }
 await new Promise((resolve) => setTimeout(resolve, 5_000));
 const creditsAfter = await readCredits();
@@ -223,27 +285,40 @@ const report = {
   failures,
   results,
 };
-await writeFile(join(outputDir, "shadow-acceptance.json"), `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 });
-console.log(JSON.stringify({
-  capturedTurns: report.capturedTurns,
-  correctionChains: report.correctionChains,
-  recallQueries: report.recallQueries,
-  successfulQueries: report.successfulQueries,
-  failedQueries: report.failedQueries,
-  p50Ms: Math.round(report.p50Ms),
-  p95Ms: Math.round(report.p95Ms),
-  maxMs: Math.round(report.maxMs),
-  outboxCounts,
-}));
+await writeFile(
+  join(outputDir, "shadow-acceptance.json"),
+  `${JSON.stringify(report, null, 2)}\n`,
+  { mode: 0o600 },
+);
+console.log(
+  JSON.stringify({
+    capturedTurns: report.capturedTurns,
+    correctionChains: report.correctionChains,
+    recallQueries: report.recallQueries,
+    successfulQueries: report.successfulQueries,
+    failedQueries: report.failedQueries,
+    p50Ms: Math.round(report.p50Ms),
+    p95Ms: Math.round(report.p95Ms),
+    maxMs: Math.round(report.maxMs),
+    outboxCounts,
+  }),
+);
 if (failures.length || report.p95Ms > 5_000) process.exitCode = 1;
 
-async function waitForOperation(operationId: string, timeoutMs: number): Promise<void> {
+async function waitForOperation(
+  operationId: string,
+  timeoutMs: number,
+): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const operation = await client.operationStatus(provider.bankId(), operationId);
+    const operation = await client.operationStatus(
+      provider.bankId(),
+      operationId,
+    );
     const status = operation.status.toLowerCase();
     if (status === "completed") return;
-    if (status === "failed" || status === "cancelled") throw new Error(`operation ${status}: ${operationId}`);
+    if (status === "failed" || status === "cancelled")
+      throw new Error(`operation ${status}: ${operationId}`);
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
   throw new Error(`operation timed out: ${operationId}`);
@@ -251,12 +326,21 @@ async function waitForOperation(operationId: string, timeoutMs: number): Promise
 
 function percentile(values: number[], p: number): number {
   const sorted = [...values].sort((a, b) => a - b);
-  return sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * p) - 1)] ?? 0;
+  return (
+    sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * p) - 1)] ?? 0
+  );
 }
 
 async function readCredits(): Promise<unknown> {
-  const env = readFileSync(`${process.env.HOME}/.hindsight/hindsight-control/server.env`, "utf8");
-  const line = env.split(/\r?\n/).find((item) => item.startsWith("HINDSIGHT_API_RERANKER_OPENROUTER_API_KEY="));
+  const env = readFileSync(
+    `${process.env.HOME}/.hindsight/hindsight-control/server.env`,
+    "utf8",
+  );
+  const line = env
+    .split(/\r?\n/)
+    .find((item) =>
+      item.startsWith("HINDSIGHT_API_RERANKER_OPENROUTER_API_KEY="),
+    );
   const key = line?.split("=").slice(1).join("=").trim();
   if (!key) return null;
   try {

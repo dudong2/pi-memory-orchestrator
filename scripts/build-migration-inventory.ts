@@ -1,6 +1,9 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { buildMigrationInventory, type ScopeMapping } from "../src/migration/inventory.js";
+import {
+  buildMigrationInventory,
+  type ScopeMapping,
+} from "../src/migration/inventory.js";
 import { parseJson } from "../src/json.js";
 
 const backup = process.argv[2];

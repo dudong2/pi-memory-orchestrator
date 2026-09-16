@@ -31,14 +31,6 @@ function currentScopeTag(scope: ResolvedScope): string {
   return scope.scopeTag;
 }
 
-function workspaceScopeTag(scope: ResolvedScope): string {
-  if (scope.kind !== "repository") return scope.scopeTag;
-  return (
-    scope.ancestors.find((ancestor) => ancestor.kind === "workspace")?.tag ??
-    scope.scopeTag
-  );
-}
-
 export class ScopedHindsightProvider {
   readonly #config: OrchestratorConfig;
   readonly #client: HindsightClient;
@@ -120,7 +112,10 @@ export class ScopedHindsightProvider {
           harness: identity.harness,
           session_id: identity.sessionId,
           turn_id: identity.turnId,
-          workspace_id: scope.marker.workspaceId,
+          scope_id: scope.scopeId,
+          scope_name: scope.scopeName,
+          ...(scope.projectId ? { project_id: scope.projectId } : {}),
+          ...(scope.projectName ? { project_name: scope.projectName } : {}),
           ...(scope.repositoryId ? { repository: scope.repositoryId } : {}),
         },
       },
@@ -132,14 +127,10 @@ export class ScopedHindsightProvider {
     input: {
       identity: string;
       content: string;
-      target: "current" | "workspace";
       timestamp?: string;
     },
   ): Promise<void> {
-    const scopeTag =
-      input.target === "workspace"
-        ? workspaceScopeTag(scope)
-        : currentScopeTag(scope);
+    const scopeTag = currentScopeTag(scope);
     const timestamp = input.timestamp ?? new Date().toISOString();
     await this.#outbox.enqueue({
       identity: input.identity,
@@ -155,7 +146,10 @@ export class ScopedHindsightProvider {
         metadata: {
           source: "pi-memory-orchestrator-explicit",
           harness: this.#config.harness,
-          workspace_id: scope.marker.workspaceId,
+          scope_id: scope.scopeId,
+          scope_name: scope.scopeName,
+          ...(scope.projectId ? { project_id: scope.projectId } : {}),
+          ...(scope.projectName ? { project_name: scope.projectName } : {}),
           ...(scope.repositoryId ? { repository: scope.repositoryId } : {}),
         },
       },

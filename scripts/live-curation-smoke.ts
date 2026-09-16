@@ -8,7 +8,11 @@ const connection = parseJson<{ apiUrl: string; apiToken: string }>(
   readFileSync(`${process.env.HOME}/.hindsight/coding-agent.json`, "utf8"),
   "Hindsight connection",
 );
-const client = new HindsightClient({ apiUrl: connection.apiUrl, apiToken: connection.apiToken, requestTimeoutMs: 30_000 });
+const client = new HindsightClient({
+  apiUrl: connection.apiUrl,
+  apiToken: connection.apiToken,
+  requestTimeoutMs: 30_000,
+});
 const bankId = "coding-agent::dudong2::shadow";
 const token = `curationprobe-${randomUUID()}`;
 const tag = `scope:workspace:${token}`;
@@ -16,14 +20,16 @@ const operationId = deterministicOperationId(token);
 await client.retain(bankId, {
   async: true,
   operation_id: operationId,
-  items: [{
-    content: `${token} says the preferred package manager is yarn.`,
-    timestamp: new Date().toISOString(),
-    tags: [tag],
-    observation_scopes: [[tag]],
-    document_id: token,
-    metadata: { source: "curation-smoke" },
-  }],
+  items: [
+    {
+      content: `${token} says the preferred package manager is yarn.`,
+      timestamp: new Date().toISOString(),
+      tags: [tag],
+      observation_scopes: [[tag]],
+      document_id: token,
+      metadata: { source: "curation-smoke" },
+    },
+  ],
 });
 const deadline = Date.now() + 180_000;
 while (Date.now() < deadline) {
@@ -32,25 +38,33 @@ while (Date.now() < deadline) {
   if (status.status === "failed") throw new Error("retain failed");
   await new Promise((resolve) => setTimeout(resolve, 500));
 }
-const search = () => client.recall(bankId, {
-  query: token,
-  types: ["world", "experience"],
-  budget: "mid",
-  max_tokens: 1_024,
-  tag_groups: [{ tags: [tag], match: "all_strict" }],
-});
+const search = () =>
+  client.recall(bankId, {
+    query: token,
+    types: ["world", "experience"],
+    budget: "mid",
+    max_tokens: 1_024,
+    tag_groups: [{ tags: [tag], match: "all_strict" }],
+  });
 const initial = await search();
 const memory = initial.results.find((item) => item.text.includes(token));
 const memoryId = memory?.id ?? memory?.memory_id;
 if (!memoryId) throw new Error("curation probe memory not found");
-await client.updateMemory(bankId, memoryId, { state: "invalidated", reason: "curation smoke" });
+await client.updateMemory(bankId, memoryId, {
+  state: "invalidated",
+  reason: "curation smoke",
+});
 const invalidated = await search();
 await client.updateMemory(bankId, memoryId, { state: "valid" });
 const restored = await search();
 const result = {
   foundInitially: Boolean(memoryId),
-  hiddenAfterInvalidation: !invalidated.results.some((item) => item.text.includes(token)),
-  visibleAfterRestore: restored.results.some((item) => item.text.includes(token)),
+  hiddenAfterInvalidation: !invalidated.results.some((item) =>
+    item.text.includes(token),
+  ),
+  visibleAfterRestore: restored.results.some((item) =>
+    item.text.includes(token),
+  ),
 };
 console.log(JSON.stringify(result));
 if (!Object.values(result).every(Boolean)) process.exitCode = 1;
