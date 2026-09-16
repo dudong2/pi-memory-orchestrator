@@ -7,6 +7,13 @@ import { HindsightClient } from "../src/hindsight/client.js";
 import { RetainOutbox } from "../src/hindsight/outbox.js";
 import { ScopedHindsightProvider } from "../src/hindsight/provider.js";
 import type { ResolvedScope } from "../src/scope/resolver.js";
+import {
+  acceptanceScope as scope,
+  currentRepo,
+  sharedAcceptanceScope,
+  siblingAcceptanceScope,
+  siblingRepo,
+} from "./acceptance-scope.js";
 
 const outputDir = process.argv[2];
 if (!outputDir) throw new Error("usage: shadow-acceptance <output-dir>");
@@ -28,45 +35,6 @@ const outbox = new RetainOutbox({
   maxAttempts: 20,
 });
 const provider = new ScopedHindsightProvider(config, client, outbox);
-const workspaceId = "ws_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
-const currentRepo = "github.com/dudong2/scope-current";
-const siblingRepo = "github.com/dudong2/scope-sibling";
-const scope: ResolvedScope = {
-  workspaceRoot: "/acceptance/workspace",
-  markerPath: "/acceptance/workspace/.pi-memory-scope.json",
-  marker: {
-    version: 1,
-    workspaceId,
-    displayName: "acceptance-workspace",
-    repositories: [currentRepo, siblingRepo],
-    createdAt: "2026-01-01T00:00:00.000Z",
-    updatedAt: "2026-03-01T00:00:00.000Z",
-  },
-  workspaceTag: `scope:workspace:${workspaceId}`,
-  repositoryId: currentRepo,
-  repositoryTag: `scope:repo:${currentRepo}`,
-  git: null,
-  scopeTag: `scope:repo:${currentRepo}`,
-  kind: "repository",
-  ancestors: [
-    {
-      root: "/acceptance",
-      markerPath: "/acceptance/.pi-memory-scope.json",
-      marker: {
-        version: 1,
-        workspaceId,
-        displayName: "acceptance-workspace",
-        repositories: [],
-        createdAt: "2026-01-01T00:00:00.000Z",
-        updatedAt: "2026-03-01T00:00:00.000Z",
-      },
-      kind: "workspace",
-      tag: `scope:workspace:${workspaceId}`,
-    },
-  ],
-  knownRepositoryIds: [currentRepo, siblingRepo],
-  workspaceRepositoryIds: [currentRepo, siblingRepo],
-};
 
 const turns: Array<{
   sessionId: string;
@@ -95,14 +63,7 @@ for (let chain = 1; chain <= 10; chain++) {
 }
 for (let index = 1; index <= 10; index++) {
   const id = String(index).padStart(2, "0");
-  const workspaceOnly: ResolvedScope = {
-    ...scope,
-    repositoryId: undefined,
-    repositoryTag: undefined,
-    scopeTag: scope.workspaceTag,
-    kind: "workspace",
-    ancestors: [],
-  };
+  const workspaceOnly: ResolvedScope = sharedAcceptanceScope;
   turns.push({
     sessionId: `acceptance-workspace-${id}`,
     turnId: `workspace-${id}`,
@@ -125,12 +86,7 @@ for (let index = 1; index <= 5; index++) {
 }
 for (let index = 1; index <= 5; index++) {
   const id = String(index).padStart(2, "0");
-  const siblingScope: ResolvedScope = {
-    ...scope,
-    repositoryId: siblingRepo,
-    repositoryTag: `scope:repo:${siblingRepo}`,
-    scopeTag: `scope:repo:${siblingRepo}`,
-  };
+  const siblingScope: ResolvedScope = siblingAcceptanceScope;
   turns.push({
     sessionId: `acceptance-sibling-${id}`,
     turnId: `sibling-${id}`,
@@ -207,7 +163,7 @@ for (let index = 1; index <= 10; index++) {
   const id = String(index).padStart(2, "0");
   baseQueries.push({
     name: `workspace-${id}`,
-    query: `What protocol does SharedWorkspaceRule${id} require?`,
+    query: `scope:acceptance/shared What protocol does SharedWorkspaceRule${id} require?`,
     expected: `workspacevalue${id}`,
   });
 }

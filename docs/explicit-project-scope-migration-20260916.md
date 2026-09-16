@@ -6,7 +6,7 @@ The live Pi/OMP memory stack now uses an explicit catalog instead of filesystem 
 
 - Catalog: `~/.local/share/pi-memory-orchestrator/scope-catalog.json`
 - Projects: 8
-- Scopes: 14, including the special global Scope
+- Scopes: 13, including the special global Scope
 - Hermes Scope stores: `~/.pi/agent/projects-memory/<scopeId>/`
 - Hindsight bank: `coding-agent::dudong2`
 
@@ -21,11 +21,11 @@ Projects do not own memory. Each non-global Scope owns one existing Hindsight `m
 - `certen-io` → `certen-io/certen-io`
 - `ai-chat-engine` → `character-ai-chat/ai-chat-engine`
 - `pi-memory-orchestrator` → `pi-memory-orchestrator/pi-memory-orchestrator`
-- Stable shared performance memory → `stablelabs/performance`
+- Stable shared performance memory → `stablelabs/stable`
 - Stable repositories → `stablelabs/{stable,stable-bft,stable-evm,stable-geth,stable-sdk}`
 - `scratchpad` remains the special global Scope.
 
-Empty parent markers at `LuckyCat/` and `character-ai-chat/` were retired. The old filesystem-derived `scope-index.json` was retired after the v2 catalog and marker files were written.
+Empty parent markers at `LuckyCat/` and `character-ai-chat/` were retired. A follow-up migration moved the artificial `stablelabs/performance` Scope into `stablelabs/stable` and removed `stablelabs/.pi-memory-scope.json`. The old filesystem-derived `scope-index.json` was retired after the v2 catalog and marker files were written.
 
 ## Hermes cleanup
 
@@ -41,6 +41,12 @@ Failure-memory project attribution was updated to qualified `Project/Scope` name
 
 The backup contains the v1 scope index, old markers, complete `projects-memory`, an SQLite online backup, retired Hermes directories, the migration plan, and the report.
 
+The `stablelabs/performance` follow-up has a separate official database backup, complete bank export, transformed document archive, marker/catalog snapshots, and verification report under:
+
+```text
+~/.local/share/pi-memory-orchestrator/backups/merge-stablelabs-performance-20260916T014445Z/
+```
+
 ## Hermes integration
 
 `pi-hermes-memory@0.9.9` is patched through the version-checked installer:
@@ -55,11 +61,11 @@ node --import tsx scripts/install-pi-hermes-scope-hook.ts
 
 ```text
 npm run check: pass
-npm test: 51/51 pass
+npm test: 52/52 pass
 Pi runtime smoke: OK
 OMP runtime smoke: OK
 Hermes SQLite quick_check: ok
 Default live recall: global + current Scope only
-Explicit project:stablelabs recall: all six stablelabs Scopes
+Explicit project:stablelabs recall: all five repository Scopes
 Knowledge tree: Coding Projects → Project → Scope
 ```

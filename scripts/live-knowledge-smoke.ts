@@ -9,7 +9,11 @@ if (!cwd) throw new Error("usage: live-knowledge-smoke <cwd>");
 const config = loadConfig();
 const connection = resolveHindsightConnection(config);
 const client = new HindsightClient({ ...connection, requestTimeoutMs: config.requestTimeoutMs });
-const scope = await resolveScope(cwd, { dataDir: config.dataDir, markerName: config.markerName });
+const scope = await resolveScope(cwd, {
+  dataDir: config.dataDir,
+  markerName: config.markerName,
+});
+if (!scope) throw new Error(`memory Scope is not registered: ${cwd}`);
 const bankId = config.shadowBankId;
 const first = await ensureKnowledgeViews(client, bankId, scope);
 const second = await ensureKnowledgeViews(client, bankId, scope);

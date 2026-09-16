@@ -1,12 +1,5 @@
 {
   "extends": "./tsconfig.json",
-  "include": [
-    "src/**/*.ts",
-    "scripts/install-pi-hermes-scope-hook.ts",
-    "scripts/migrate-explicit-project-scopes.ts",
-    "scripts/migrate-hermes-failure-scopes.ts",
-    "scripts/migrate-hermes-scope-stores.ts",
-    "scripts/migrate-knowledge-project-scopes.ts"
-  ],
+  "include": ["src/**/*.ts", "scripts/**/*.ts"],
   "exclude": ["node_modules"]
 }

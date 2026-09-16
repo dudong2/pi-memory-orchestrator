@@ -449,6 +449,24 @@ export async function restoreScopeMarker(
   return target;
 }
 
+export async function removeScope(
+  dataDir: string,
+  scopeId: string,
+): Promise<ScopeRecord | null> {
+  const path = catalogPath(dataDir);
+  const release = await acquireLock(`${path}.lock`);
+  try {
+    const catalog = await loadScopeCatalog(dataDir);
+    const scope = catalog.scopes[scopeId];
+    if (!scope) return null;
+    delete catalog.scopes[scopeId];
+    await writeJsonAtomic(path, catalog);
+    return scope;
+  } finally {
+    await release();
+  }
+}
+
 export async function resolveCatalogRecord(
   dataDir: string,
   marker: ScopeMarker,

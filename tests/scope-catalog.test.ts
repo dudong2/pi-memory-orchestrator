@@ -16,6 +16,7 @@ import {
   createScope,
   loadScopeCatalog,
   projectByName,
+  removeScope,
 } from "../src/scope/catalog.js";
 import { resolveScope } from "../src/scope/resolver.js";
 
@@ -116,6 +117,32 @@ test("moving a marker-bearing non-Git scope preserves identity and updates the c
     catalog.scopes[registered.scopeId]?.paths.at(-1),
     await realpath(second),
   );
+});
+
+test("removing a Scope leaves its Project and sibling Scopes intact", async () => {
+  const root = await tempRoot("memory-catalog-remove-");
+  const dataDir = join(root, "state");
+  const project = await createProject(dataDir, "Stable");
+  const firstRoot = join(root, "first");
+  const secondRoot = join(root, "second");
+  await mkdir(firstRoot);
+  await mkdir(secondRoot);
+  const first = await createScope(dataDir, {
+    root: firstRoot,
+    projectId: project.projectId,
+    name: "first",
+  });
+  const second = await createScope(dataDir, {
+    root: secondRoot,
+    projectId: project.projectId,
+    name: "second",
+  });
+
+  assert.equal((await removeScope(dataDir, first.scopeId))?.scopeId, first.scopeId);
+  const catalog = await loadScopeCatalog(dataDir);
+  assert.ok(catalog.projects[project.projectId]);
+  assert.equal(catalog.scopes[first.scopeId], undefined);
+  assert.ok(catalog.scopes[second.scopeId]);
 });
 
 test("project lookup is case-insensitive and aliases are explicit", async () => {
