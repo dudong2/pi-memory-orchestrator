@@ -37,9 +37,7 @@ const documents = (await get(
 const documentIds = new Set(documents.items.map((item) => item.id));
 const documentMap = new Map(documents.items.map((item) => [item.id, item]));
 const missingDocuments = expected.flatMap((item) =>
-  documentIds.has(item.documentId)
-    ? []
-    : [`${item.bankId}/${item.documentId}`],
+  documentIds.has(item.documentId) ? [] : [`${item.bankId}/${item.documentId}`],
 );
 const scopeTags = [
   ...new Set(

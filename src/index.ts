@@ -137,9 +137,7 @@ function formatCatalogMatches(catalog: ScopeCatalog, input: string): string[] {
   const query = input.trim().toLocaleLowerCase("en-US");
   const matches = (names: string[]) =>
     !query ||
-    names.some((name) =>
-      name.toLocaleLowerCase("en-US").includes(query),
-    );
+    names.some((name) => name.toLocaleLowerCase("en-US").includes(query));
   const scopes = Object.values(catalog.scopes).sort((left, right) =>
     compareNames(left.name, right.name),
   );
