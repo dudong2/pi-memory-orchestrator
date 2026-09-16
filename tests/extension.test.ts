@@ -1,15 +1,20 @@
 import assert from "node:assert/strict";
+import { mkdir, mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { DEFAULT_CONFIG } from "../src/config.js";
 import { createMemoryOrchestratorExtension } from "../src/index.js";
 import type { ScopedHindsightProvider } from "../src/hindsight/provider.js";
+import { createProject, createScope } from "../src/scope/catalog.js";
 import type { ResolvedScope } from "../src/scope/resolver.js";
 import { scope } from "./fixtures.js";
 
 function harness(
   mode: "shadow" | "active",
   resolvedScope: ResolvedScope | null = scope,
+  dataDir = "/tmp/pi-memory-orchestrator-extension-test",
 ) {
   const handlers = new Map<string, Function[]>();
   const tools: unknown[] = [];
@@ -76,7 +81,7 @@ function harness(
     ...DEFAULT_CONFIG,
     mode,
     apiToken: "test",
-    dataDir: "/tmp/pi-memory-orchestrator-extension-test",
+    dataDir,
   };
   createMemoryOrchestratorExtension({
     config,
@@ -124,6 +129,55 @@ test("shadow mode captures turns but exposes no tool or automatic recall", async
   );
   assert.equal(runtime.calls.recall, 0);
   assert.equal(runtime.calls.enqueued, 1);
+});
+
+test("/memory-find groups and sorts all Projects and their Scopes", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memory-find-command-"));
+  const dataDir = join(root, "state");
+  const alphaRoot = join(root, "alpha");
+  const appleRoot = join(root, "apple");
+  const zuluRoot = join(root, "zulu");
+  await Promise.all([
+    mkdir(alphaRoot, { recursive: true }),
+    mkdir(appleRoot, { recursive: true }),
+    mkdir(zuluRoot, { recursive: true }),
+  ]);
+  const zulu = await createProject(dataDir, "Zulu");
+  const alpha = await createProject(dataDir, "Alpha");
+  await createScope(dataDir, {
+    root: alphaRoot,
+    projectId: alpha.projectId,
+    name: "zebra",
+  });
+  await createScope(dataDir, {
+    root: appleRoot,
+    projectId: alpha.projectId,
+    name: "apple",
+  });
+  await createScope(dataDir, {
+    root: zuluRoot,
+    projectId: zulu.projectId,
+    name: "beta",
+  });
+  const runtime = harness("shadow", scope, dataDir);
+  const ctx = context(runtime.notifications);
+  const command = runtime.commands.get("memory-find") as {
+    handler(args: string, ctx: ReturnType<typeof context>): Promise<void>;
+  };
+
+  await command.handler("", ctx);
+
+  assert.equal(
+    runtime.notifications.at(-1)?.message,
+    [
+      "Project: Alpha",
+      "  Scope: apple",
+      "  Scope: zebra",
+      "",
+      "Project: Zulu",
+      "  Scope: beta",
+    ].join("\n"),
+  );
 });
 
 test("unresolved filesystems fail open without scoped recall or retention", async () => {

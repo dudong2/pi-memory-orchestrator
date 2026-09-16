@@ -259,7 +259,7 @@ Each Scope page uses a strict tag filter. There is no filesystem-parent knowledg
 ## Commands and tools
 
 - `/memory-orchestrator-status`: current Project/Scope, bank, and outbox status.
-- `/memory-find <name>`: read-only Project/Scope catalog lookup.
+- `/memory-find [name]`: read-only Project/Scope catalog lookup, grouped and sorted by Project; omit `name` to list the entire catalog.
 - `/memory-reassign-scope [project]`: permanently move the current Scope to another Project while preserving its `scopeId` and `memoryTag`; without an argument, select the target interactively.
 - `long_memory`: scoped Hindsight search, retain, correct, and forget.
 - Hermes `memory_*` tools: bounded global/user/failure/current-Scope memory.

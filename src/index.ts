@@ -28,6 +28,7 @@ import {
   projectByName,
   qualifiedScopeName,
   reassignScopeProject,
+  type ScopeCatalog,
 } from "./scope/catalog.js";
 import { onboardScope } from "./scope/onboarding.js";
 import {
@@ -126,6 +127,59 @@ function describeScope(scope: ResolvedScope | null): string {
     ? `${scope.projectName}/${scope.scopeName}`
     : scope.scopeName;
   return scope.repositoryId ? `${name} (${scope.repositoryId})` : name;
+}
+
+function compareNames(left: string, right: string): number {
+  return left.localeCompare(right, "en-US", { sensitivity: "base" });
+}
+
+function formatCatalogMatches(catalog: ScopeCatalog, input: string): string[] {
+  const query = input.trim().toLocaleLowerCase("en-US");
+  const matches = (names: string[]) =>
+    !query ||
+    names.some((name) =>
+      name.toLocaleLowerCase("en-US").includes(query),
+    );
+  const scopes = Object.values(catalog.scopes).sort((left, right) =>
+    compareNames(left.name, right.name),
+  );
+  const sections = Object.values(catalog.projects)
+    .sort((left, right) => compareNames(left.name, right.name))
+    .flatMap((project) => {
+      const projectMatches = matches([project.name, ...project.aliases]);
+      const projectScopes = scopes.filter(
+        (scope) =>
+          scope.projectId === project.projectId &&
+          (projectMatches ||
+            matches([
+              qualifiedScopeName(catalog, scope),
+              scope.name,
+              ...scope.aliases,
+            ])),
+      );
+      if (!projectMatches && !projectScopes.length) return [];
+      return [
+        [
+          `Project: ${project.name}`,
+          ...projectScopes.map((scope) => `  Scope: ${scope.name}`),
+        ].join("\n"),
+      ];
+    });
+  const standaloneScopes = scopes.filter(
+    (scope) =>
+      (!scope.projectId || !catalog.projects[scope.projectId]) &&
+      matches([
+        qualifiedScopeName(catalog, scope),
+        scope.name,
+        ...scope.aliases,
+      ]),
+  );
+  return [
+    ...sections,
+    ...standaloneScopes.map(
+      (scope) => `Scope: ${qualifiedScopeName(catalog, scope)}`,
+    ),
+  ];
 }
 
 export function createMemoryOrchestratorExtension(
@@ -249,33 +303,11 @@ export function createMemoryOrchestratorExtension(
     pi.registerCommand("memory-find", {
       description: "Find registered memory Projects and Scopes by name.",
       handler: async (args, ctx) => {
-        const query = args.trim().toLocaleLowerCase("en-US");
         const catalog = await loadScopeCatalog(config.dataDir);
-        const projects = Object.values(catalog.projects).filter(
-          (project) =>
-            !query ||
-            [project.name, ...project.aliases].some((name) =>
-              name.toLocaleLowerCase("en-US").includes(query),
-            ),
-        );
-        const scopes = Object.values(catalog.scopes).filter((scope) => {
-          const qualified = qualifiedScopeName(catalog, scope);
-          return (
-            !query ||
-            [qualified, scope.name, ...scope.aliases].some((name) =>
-              name.toLocaleLowerCase("en-US").includes(query),
-            )
-          );
-        });
-        const lines = [
-          ...projects.map((project) => `Project: ${project.name}`),
-          ...scopes.map(
-            (scope) => `Scope: ${qualifiedScopeName(catalog, scope)}`,
-          ),
-        ];
+        const sections = formatCatalogMatches(catalog, args);
         ctx.ui.notify(
-          lines.length
-            ? lines.join("\n")
+          sections.length
+            ? sections.join("\n\n")
             : "일치하는 Project 또는 Scope가 없습니다.",
           "info",
         );
