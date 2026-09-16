@@ -7,6 +7,8 @@ import {
   readFile,
   realpath,
   rename,
+  rm,
+  writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,6 +18,7 @@ import {
   createScope,
   loadScopeCatalog,
   projectByName,
+  reassignScopeProject,
   removeScope,
 } from "../src/scope/catalog.js";
 import { resolveScope } from "../src/scope/resolver.js";
@@ -146,6 +149,97 @@ test("removing a Scope leaves its Project and sibling Scopes intact", async () =
   assert.ok(catalog.projects[project.projectId]);
   assert.equal(catalog.scopes[first.scopeId], undefined);
   assert.ok(catalog.scopes[second.scopeId]);
+});
+
+test("reassigning a Scope preserves its identity and memory tag", async () => {
+  const root = await tempRoot("memory-catalog-reassign-");
+  const dataDir = join(root, "state");
+  const scopeRoot = join(root, "service");
+  await mkdir(scopeRoot);
+  const source = await createProject(dataDir, "Source");
+  const target = await createProject(dataDir, "Target");
+  const registered = await createScope(dataDir, {
+    root: scopeRoot,
+    projectId: source.projectId,
+    name: "service",
+  });
+
+  const reassigned = await reassignScopeProject(
+    dataDir,
+    registered.scopeId,
+    target.projectId,
+    "2026-09-16T12:00:00.000Z",
+  );
+
+  assert.equal(reassigned.scopeId, registered.scopeId);
+  assert.equal(reassigned.memoryTag, registered.memoryTag);
+  assert.equal(reassigned.projectId, target.projectId);
+  assert.equal(reassigned.updatedAt, "2026-09-16T12:00:00.000Z");
+  const marker = JSON.parse(
+    await readFile(join(scopeRoot, ".pi-memory-scope.json"), "utf8"),
+  );
+  assert.equal(marker.scopeId, registered.scopeId);
+  assert.equal(marker.projectId, target.projectId);
+  const resolved = await resolveScope(scopeRoot, {
+    dataDir,
+    startCwd: scopeRoot,
+  });
+  assert.equal(resolved?.projectName, "Target");
+  assert.equal(resolved?.scopeTag, registered.memoryTag);
+});
+
+test("reassigning a Scope rejects a duplicate name without changing either file", async () => {
+  const root = await tempRoot("memory-catalog-reassign-conflict-");
+  const dataDir = join(root, "state");
+  const firstRoot = join(root, "first");
+  const secondRoot = join(root, "second");
+  await mkdir(firstRoot);
+  await mkdir(secondRoot);
+  const source = await createProject(dataDir, "Source");
+  const target = await createProject(dataDir, "Target");
+  const first = await createScope(dataDir, {
+    root: firstRoot,
+    projectId: source.projectId,
+    name: "service",
+  });
+  await createScope(dataDir, {
+    root: secondRoot,
+    projectId: target.projectId,
+    name: "service",
+  });
+  const markerBefore = await readFile(first.markerPath, "utf8");
+
+  await assert.rejects(
+    reassignScopeProject(dataDir, first.scopeId, target.projectId),
+    /already has Scope 'service'/,
+  );
+
+  const catalog = await loadScopeCatalog(dataDir);
+  assert.equal(catalog.scopes[first.scopeId]?.projectId, source.projectId);
+  assert.equal(await readFile(first.markerPath, "utf8"), markerBefore);
+});
+
+test("reassigning a Scope rolls back the catalog when its marker cannot be written", async () => {
+  const root = await tempRoot("memory-catalog-reassign-rollback-");
+  const dataDir = join(root, "state");
+  const scopeRoot = join(root, "service");
+  await mkdir(scopeRoot);
+  const source = await createProject(dataDir, "Source");
+  const target = await createProject(dataDir, "Target");
+  const registered = await createScope(dataDir, {
+    root: scopeRoot,
+    projectId: source.projectId,
+    name: "service",
+  });
+  await rm(scopeRoot, { recursive: true, force: true });
+  await writeFile(scopeRoot, "marker parent is not a directory");
+
+  await assert.rejects(
+    reassignScopeProject(dataDir, registered.scopeId, target.projectId),
+  );
+
+  const catalog = await loadScopeCatalog(dataDir);
+  assert.equal(catalog.scopes[registered.scopeId]?.projectId, source.projectId);
 });
 
 test("project lookup is case-insensitive and aliases are explicit", async () => {

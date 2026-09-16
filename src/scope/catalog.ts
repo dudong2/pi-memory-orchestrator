@@ -10,15 +10,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { homedir } from "node:os";
-import {
-  basename,
-  dirname,
-  isAbsolute,
-  join,
-  relative,
-  resolve,
-  sep,
-} from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 export const SCOPE_CATALOG_VERSION = 2 as const;
 export const SCOPE_MARKER_VERSION = 2 as const;
@@ -370,6 +362,92 @@ export async function createScope(
     await writeJsonAtomic(path, catalog);
     await writeJsonAtomic(markerPath, marker);
     return record;
+  } finally {
+    await release();
+  }
+}
+
+export async function reassignScopeProject(
+  dataDir: string,
+  scopeId: string,
+  targetProjectId: string,
+  updatedAt = new Date().toISOString(),
+): Promise<ScopeRecord> {
+  const path = catalogPath(dataDir);
+  const release = await acquireLock(`${path}.lock`);
+  try {
+    const catalog = await loadScopeCatalog(dataDir);
+    const scope = catalog.scopes[scopeId];
+    if (!scope) throw new Error(`unknown scopeId: ${scopeId}`);
+    if (scope.kind === "global") {
+      throw new Error("the global Scope cannot belong to a Project");
+    }
+    const sourceProjectId = scope.projectId;
+    if (!sourceProjectId || !catalog.projects[sourceProjectId]) {
+      throw new Error(`Scope '${scope.name}' has no registered source Project`);
+    }
+    const targetProject = catalog.projects[targetProjectId];
+    if (!targetProject)
+      throw new Error(`unknown projectId: ${targetProjectId}`);
+    if (sourceProjectId === targetProjectId) return scope;
+
+    const duplicate = Object.values(catalog.scopes).find(
+      (candidate) =>
+        candidate.scopeId !== scopeId &&
+        candidate.projectId === targetProjectId &&
+        nameKey(candidate.name) === nameKey(scope.name),
+    );
+    if (duplicate) {
+      throw new Error(
+        `Project '${targetProject.name}' already has Scope '${scope.name}'`,
+      );
+    }
+
+    const marker = await readScopeMarker(scope.markerPath);
+    if (marker.scopeId !== scopeId || marker.projectId !== sourceProjectId) {
+      throw new Error(
+        `Scope marker does not match catalog membership: ${scope.markerPath}`,
+      );
+    }
+    const nextMarker: ScopeMarker = {
+      ...marker,
+      projectId: targetProjectId,
+      updatedAt,
+    };
+    const nextScope: ScopeRecord = {
+      ...scope,
+      projectId: targetProjectId,
+      marker: nextMarker,
+      updatedAt,
+    };
+    const previousCatalog = structuredClone(catalog);
+    catalog.scopes[scopeId] = nextScope;
+    catalog.projects[sourceProjectId] = {
+      ...catalog.projects[sourceProjectId],
+      updatedAt,
+    };
+    catalog.projects[targetProjectId] = {
+      ...targetProject,
+      updatedAt,
+    };
+
+    await writeJsonAtomic(path, catalog);
+    try {
+      // lazy: two filesystem renames cannot be one atomic commit. A durable
+      // transaction journal would remove the brief catalog/marker skew window.
+      await writeJsonAtomic(scope.markerPath, nextMarker);
+    } catch (error) {
+      try {
+        await writeJsonAtomic(path, previousCatalog);
+      } catch (rollbackError) {
+        throw new Error(
+          `Scope reassignment failed and catalog rollback also failed: ${String(rollbackError)}`,
+          { cause: error },
+        );
+      }
+      throw error;
+    }
+    return nextScope;
   } finally {
     await release();
   }

@@ -23,7 +23,12 @@ import {
   type HermesProjectResolutionRequest,
 } from "./hermes.js";
 import { enqueueProjectMemoryMirror } from "./mirror.js";
-import { loadScopeCatalog, qualifiedScopeName } from "./scope/catalog.js";
+import {
+  loadScopeCatalog,
+  projectByName,
+  qualifiedScopeName,
+  reassignScopeProject,
+} from "./scope/catalog.js";
 import { onboardScope } from "./scope/onboarding.js";
 import {
   resolveScope,
@@ -35,6 +40,9 @@ export interface ExtensionDependencies {
   config?: OrchestratorConfig;
   provider?: ScopedHindsightProvider;
   scopeResolver?: (cwd: string) => Promise<ResolvedScope | null>;
+  syncHermesScopeStore?: (
+    scope: ResolvedScope,
+  ) => Promise<{ name: string; memoryDir: string } | null | unknown>;
   clock?: () => number;
 }
 
@@ -153,6 +161,8 @@ export function createMemoryOrchestratorExtension(
         }
       });
     const clock = dependencies.clock ?? Date.now;
+    const syncHermesScopeStore =
+      dependencies.syncHermesScopeStore ?? ensureHermesScopeStore;
 
     let currentScope: ResolvedScope | null = null;
     let scopeCwd = "";
@@ -269,6 +279,156 @@ export function createMemoryOrchestratorExtension(
             : "일치하는 Project 또는 Scope가 없습니다.",
           "info",
         );
+      },
+    });
+
+    pi.registerCommand("memory-reassign-scope", {
+      description:
+        "Permanently reassign the current Scope to another memory Project.",
+      handler: async (args, ctx) => {
+        const previousScope = await ensureScope(ctx.cwd, ctx);
+        if (!previousScope) {
+          ctx.ui.notify(unavailableScopeMessage, "error");
+          return;
+        }
+        if (
+          previousScope.kind === "global" ||
+          !previousScope.projectId ||
+          !previousScope.projectName
+        ) {
+          ctx.ui.notify(
+            "Global Scope는 Project에 재소속할 수 없습니다.",
+            "error",
+          );
+          return;
+        }
+
+        const catalog = await loadScopeCatalog(config.dataDir);
+        const candidates = Object.values(catalog.projects)
+          .filter((project) => project.projectId !== previousScope.projectId)
+          .sort((a, b) => a.name.localeCompare(b.name));
+        if (!candidates.length) {
+          ctx.ui.notify("재소속할 다른 Project가 없습니다.", "warning");
+          return;
+        }
+
+        const requested = args.trim();
+        let selectedProject = requested
+          ? projectByName(catalog, requested)
+          : undefined;
+        if (!requested) {
+          const choice = await ctx.ui.select(
+            `${previousScope.projectName}/${previousScope.scopeName}의 새 Project를 선택하세요`,
+            candidates.map((project) => project.name),
+          );
+          if (!choice) return;
+          selectedProject = candidates.find(
+            (project) => project.name === choice,
+          );
+        }
+        if (!selectedProject) {
+          ctx.ui.notify(`Project를 찾을 수 없습니다: ${requested}`, "error");
+          return;
+        }
+        if (selectedProject.projectId === previousScope.projectId) {
+          ctx.ui.notify(
+            "현재 Scope는 이미 해당 Project에 속해 있습니다.",
+            "info",
+          );
+          return;
+        }
+
+        const before = `${previousScope.projectName}/${previousScope.scopeName}`;
+        const after = `${selectedProject.name}/${previousScope.scopeName}`;
+        const confirmed = await ctx.ui.confirm(
+          "Scope Project 재소속",
+          [
+            `${before} → ${after}`,
+            "",
+            `scopeId 유지: ${previousScope.scopeId}`,
+            `memoryTag 유지: ${previousScope.scopeTag}`,
+            "",
+            "이 변경은 현재 Scope의 Project 소속을 영구적으로 바꿉니다.",
+          ].join("\n"),
+        );
+        if (!confirmed) return;
+
+        let nextScope: ResolvedScope | null = null;
+        try {
+          const record = await reassignScopeProject(
+            config.dataDir,
+            previousScope.scopeId,
+            selectedProject.projectId,
+          );
+          if (
+            record.scopeId !== previousScope.scopeId ||
+            record.memoryTag !== previousScope.scopeTag
+          ) {
+            throw new Error("Scope identity changed during reassignment");
+          }
+          nextScope = await resolveScope(previousScope.workspaceRoot, {
+            markerName: config.markerName,
+            dataDir: config.dataDir,
+            startCwd: previousScope.workspaceRoot,
+          });
+          if (
+            !nextScope ||
+            nextScope.projectId !== selectedProject.projectId ||
+            nextScope.scopeTag !== previousScope.scopeTag
+          ) {
+            throw new Error("reassigned Scope did not resolve consistently");
+          }
+          await syncHermesScopeStore(nextScope);
+        } catch (error) {
+          let rollbackDetail = "";
+          try {
+            const latest = await loadScopeCatalog(config.dataDir);
+            if (
+              latest.scopes[previousScope.scopeId]?.projectId !==
+              previousScope.projectId
+            ) {
+              await reassignScopeProject(
+                config.dataDir,
+                previousScope.scopeId,
+                previousScope.projectId,
+              );
+            }
+            const restored = await resolveScope(previousScope.workspaceRoot, {
+              markerName: config.markerName,
+              dataDir: config.dataDir,
+              startCwd: previousScope.workspaceRoot,
+            });
+            currentScope = restored ?? previousScope;
+            scopeCwd = ctx.cwd;
+            scopeResolved = true;
+            if (restored) await syncHermesScopeStore(restored);
+          } catch (rollbackError) {
+            rollbackDetail = ` Rollback verification failed: ${String(rollbackError)}`;
+          }
+          ctx.ui.notify(
+            `Scope reassignment failed: ${error instanceof Error ? error.message : String(error)}.${rollbackDetail}`,
+            "error",
+          );
+          return;
+        }
+
+        currentScope = nextScope;
+        scopeCwd = ctx.cwd;
+        scopeResolved = true;
+        try {
+          await provider.ensureKnowledgeViews(nextScope, ctx.signal);
+        } catch (error) {
+          ctx.ui.notify(
+            `Scope는 재소속됐지만 Knowledge UI 갱신은 지연됐습니다: ${error instanceof Error ? error.message : String(error)}`,
+            "warning",
+          );
+        }
+        ctx.ui.notify(
+          `${before} → ${after}로 재소속했습니다. scopeId와 memoryTag는 유지됐습니다.`,
+          "info",
+        );
+        await ctx.reload();
+        return;
       },
     });
 

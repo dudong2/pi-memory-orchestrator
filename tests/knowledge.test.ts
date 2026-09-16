@@ -50,6 +50,20 @@ class FakeKnowledgeApi implements KnowledgeApi {
     this.pages.push(request);
     return node;
   }
+  async deleteKnowledgeNode(
+    _bank: string,
+    nodeId: string,
+  ): Promise<Record<string, unknown>> {
+    const remove = (nodes: KnowledgeNode[]): boolean => {
+      const index = nodes.findIndex((node) => node.id === nodeId);
+      if (index >= 0) {
+        nodes.splice(index, 1);
+        return true;
+      }
+      return nodes.some((node) => remove(node.children ?? []));
+    };
+    return { deleted: remove(this.roots) };
+  }
   find(nodes: KnowledgeNode[], id: string): KnowledgeNode | undefined {
     for (const node of nodes) {
       if (node.id === id) return node;
@@ -80,6 +94,33 @@ test("a repository marker creates one strictly filtered knowledge page", async (
     assert.deepEqual(page.trigger?.fact_types, ["observation"]);
     assert.equal(page.trigger?.mode, "delta");
   }
+});
+
+test("reassigning a Scope removes its stale Knowledge location", async () => {
+  const api = new FakeKnowledgeApi();
+  await ensureKnowledgeViews(api, "bank", scope);
+  const reassigned: typeof scope = {
+    ...scope,
+    projectId: "project_platform",
+    projectName: "platform",
+    marker: {
+      ...scope.marker,
+      projectId: "project_platform",
+      updatedAt: "2026-09-16T12:00:00.000Z",
+    },
+  };
+
+  await ensureKnowledgeViews(api, "bank", reassigned);
+
+  const root = api.roots.find((node) => node.name === "Coding Projects");
+  assert.deepEqual(
+    root?.children?.map((node) => node.name),
+    ["platform [project_platform]"],
+  );
+  assert.equal(
+    root?.children?.[0]?.children?.[0]?.name,
+    `${scope.scopeName} [${scope.scopeId}]`,
+  );
 });
 
 test("a global marker creates one shared knowledge page", async () => {

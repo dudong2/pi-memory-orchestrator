@@ -21,6 +21,11 @@ export interface KnowledgeApi {
     request: KnowledgePageRequest,
     signal?: AbortSignal,
   ): Promise<Record<string, unknown>>;
+  deleteKnowledgeNode?(
+    bankId: string,
+    nodeId: string,
+    signal?: AbortSignal,
+  ): Promise<Record<string, unknown>>;
 }
 
 export interface KnowledgeViewResult {
@@ -178,6 +183,30 @@ export async function ensureKnowledgeViews(
     )
   )
     createdPages++;
+
+  if (api.deleteKnowledgeNode) {
+    const currentProjectName = `${scope.projectName} [${scope.projectId}]`;
+    const scopeIdSuffix = ` [${scope.scopeId}]`;
+    for (const candidateProject of root.children) {
+      if (
+        candidateProject.kind !== "folder" ||
+        candidateProject.name === currentProjectName
+      ) {
+        continue;
+      }
+      const children = candidateProject.children ?? [];
+      const staleScope = children.find(
+        (child) =>
+          child.kind === "folder" && child.name.endsWith(scopeIdSuffix),
+      );
+      if (!staleScope) continue;
+      await api.deleteKnowledgeNode(
+        bankId,
+        children.length === 1 ? candidateProject.id : staleScope.id,
+        signal,
+      );
+    }
+  }
 
   return { createdFolders, createdPages };
 }
