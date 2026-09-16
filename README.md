@@ -86,6 +86,7 @@ Resolution rules:
 - Outside Git, only the exact launch-directory marker is considered.
 - Filesystem ancestors are never inherited.
 - A missing marker is restored only when repository or portable-path identity matches exactly one catalog Scope.
+- When a repository gains its first canonical `origin`, its matching `local/...` identity is promoted without changing `scopeId` or memory. Existing canonical remote identities are never rewritten automatically.
 - An unregistered location never creates a Scope automatically.
 - A new Scope automatically uses the repository-root or registration-directory basename. The user is asked for a different name only when that Project already contains the same Scope name.
 

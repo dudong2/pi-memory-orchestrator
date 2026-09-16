@@ -21,6 +21,7 @@ import {
   reassignScopeProject,
   removeScope,
 } from "../src/scope/catalog.js";
+import { resolveGitContext } from "../src/scope/git.js";
 import { resolveScope } from "../src/scope/resolver.js";
 
 async function tempRoot(prefix: string): Promise<string> {
@@ -97,6 +98,71 @@ test("a Git repository resolves its root marker from nested directories", async 
   assert.equal(scope?.scopeId, registered.scopeId);
   assert.equal(scope?.repositoryId, "github.com/dudong2/catalog-test");
   assert.equal(scope?.workspaceRoot, await realpath(root));
+});
+
+test("adding an origin promotes a local repository identity without replacing its Scope", async () => {
+  const root = await tempRoot("memory-catalog-origin-promotion-");
+  const dataDir = join(root, "state");
+  git(root, "init", "-q");
+  const localRepositoryId = resolveGitContext(root)?.repositoryId;
+  assert.match(localRepositoryId ?? "", /^local\/[0-9a-f]{16}$/);
+  const project = await createProject(dataDir, "Published Later");
+  const registered = await createScope(dataDir, {
+    root,
+    projectId: project.projectId,
+    name: "published-later",
+    repositoryId: localRepositoryId,
+  });
+
+  git(
+    root,
+    "remote",
+    "add",
+    "origin",
+    "git@github.com:Dudong2/Published-Later.git",
+  );
+
+  const scope = await resolveScope(root, { dataDir });
+  assert.equal(scope?.scopeId, registered.scopeId);
+  assert.equal(scope?.scopeTag, registered.memoryTag);
+  assert.equal(
+    scope?.repositoryId,
+    "github.com/dudong2/published-later",
+  );
+  const catalog = await loadScopeCatalog(dataDir);
+  assert.equal(
+    catalog.scopes[registered.scopeId]?.repositoryId,
+    "github.com/dudong2/published-later",
+  );
+});
+
+test("changing an existing remote does not rewrite repository identity", async () => {
+  const root = await tempRoot("memory-catalog-remote-change-");
+  const dataDir = join(root, "state");
+  git(root, "init", "-q");
+  git(root, "remote", "add", "origin", "git@github.com:dudong2/original.git");
+  const project = await createProject(dataDir, "Remote Change");
+  const registered = await createScope(dataDir, {
+    root,
+    projectId: project.projectId,
+    name: "remote-change",
+    repositoryId: "github.com/dudong2/original",
+  });
+
+  git(
+    root,
+    "remote",
+    "set-url",
+    "origin",
+    "git@github.com:dudong2/replacement.git",
+  );
+
+  assert.equal(await resolveScope(root, { dataDir }), null);
+  const catalog = await loadScopeCatalog(dataDir);
+  assert.equal(
+    catalog.scopes[registered.scopeId]?.repositoryId,
+    "github.com/dudong2/original",
+  );
 });
 
 test("moving a marker-bearing non-Git scope preserves identity and updates the catalog path", async () => {

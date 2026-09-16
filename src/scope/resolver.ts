@@ -6,6 +6,7 @@ import { resolveGitContext, type GitContext } from "./git.js";
 import {
   DEFAULT_MARKER_NAME,
   loadScopeCatalog,
+  promoteScopeRepositoryId,
   readScopeMarker,
   resolveCatalogRecord,
   restoreScopeMarker,
@@ -142,12 +143,25 @@ export async function resolveScope(
   if (!(await markerExists(markerPath))) return null;
 
   const marker = await readScopeMarker(markerPath);
-  const { catalog, scope, project } = await resolveCatalogRecord(
-    dataDir,
-    marker,
-  );
-  if (scope.kind === "repository" && git?.repositoryId !== scope.repositoryId)
-    return null;
+  const resolved = await resolveCatalogRecord(dataDir, marker);
+  const { catalog, project } = resolved;
+  let { scope } = resolved;
+  if (scope.kind === "repository" && git?.repositoryId !== scope.repositoryId) {
+    const promoted =
+      git &&
+      git.repositoryId !== git.localRepositoryId &&
+      scope.repositoryId === git.localRepositoryId
+        ? await promoteScopeRepositoryId(
+            dataDir,
+            scope.scopeId,
+            git.localRepositoryId,
+            git.repositoryId,
+          )
+        : null;
+    if (!promoted) return null;
+    scope = promoted;
+    catalog.scopes[scope.scopeId] = scope;
+  }
   if (scope.kind === "directory" && !isPathWithin(cwd, workspaceRoot))
     return null;
 

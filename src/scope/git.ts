@@ -7,6 +7,7 @@ export interface GitContext {
   commonDir: string;
   mainRoot: string;
   remote?: string;
+  localRepositoryId: string;
   repositoryId: string;
 }
 
@@ -74,14 +75,15 @@ export function resolveGitContext(cwd: string): GitContext | null {
   const mainRoot =
     basename(commonDir) === ".git" ? dirname(commonDir) : worktreeRoot;
   const remote = git(cwd, ["remote", "get-url", "origin"]);
-  const repositoryId =
-    (remote && canonicalizeGitRemote(remote)) || localRepositoryId(commonDir);
+  const localId = localRepositoryId(commonDir);
+  const repositoryId = (remote && canonicalizeGitRemote(remote)) || localId;
 
   return {
     worktreeRoot: resolve(worktreeRoot),
     commonDir,
     mainRoot: resolve(mainRoot),
     ...(remote ? { remote } : {}),
+    localRepositoryId: localId,
     repositoryId,
   };
 }
