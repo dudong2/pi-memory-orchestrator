@@ -73,8 +73,8 @@ flowchart TD
     Choose --> Existing[Choose existing Project]
     Choose --> New[Create new Project]
     Choose --> None[Continue without memory]
-    Existing --> Scope[Create Scope]
-    New --> First[Create Project and first Scope]
+    Existing --> Scope[Create Scope with folder name]
+    New --> First[Create Project and folder-named Scope]
     Scope --> Bind
     First --> Bind
     None --> Disabled[Disable Scope memory for this session only]
@@ -87,6 +87,7 @@ Resolution rules:
 - Filesystem ancestors are never inherited.
 - A missing marker is restored only when repository or portable-path identity matches exactly one catalog Scope.
 - An unregistered location never creates a Scope automatically.
+- A new Scope automatically uses the repository-root or registration-directory basename. The user is asked for a different name only when that Project already contains the same Scope name.
 
 Choosing **continue without memory** creates no marker and no catalog suppression record. Hindsight Scope memory and Hermes Scope memory are disabled only for that session. A new session asks again.
 

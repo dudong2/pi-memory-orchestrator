@@ -138,7 +138,10 @@ test("removing a Scope leaves its Project and sibling Scopes intact", async () =
     name: "second",
   });
 
-  assert.equal((await removeScope(dataDir, first.scopeId))?.scopeId, first.scopeId);
+  assert.equal(
+    (await removeScope(dataDir, first.scopeId))?.scopeId,
+    first.scopeId,
+  );
   const catalog = await loadScopeCatalog(dataDir);
   assert.ok(catalog.projects[project.projectId]);
   assert.equal(catalog.scopes[first.scopeId], undefined);

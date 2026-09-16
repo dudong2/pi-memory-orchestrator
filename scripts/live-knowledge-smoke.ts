@@ -8,7 +8,10 @@ const cwd = process.argv[2];
 if (!cwd) throw new Error("usage: live-knowledge-smoke <cwd>");
 const config = loadConfig();
 const connection = resolveHindsightConnection(config);
-const client = new HindsightClient({ ...connection, requestTimeoutMs: config.requestTimeoutMs });
+const client = new HindsightClient({
+  ...connection,
+  requestTimeoutMs: config.requestTimeoutMs,
+});
 const scope = await resolveScope(cwd, {
   dataDir: config.dataDir,
   markerName: config.markerName,
@@ -27,4 +30,5 @@ const visit = (nodes: typeof tree.roots) => {
 };
 visit(tree.roots);
 console.log(JSON.stringify({ first, second, names }));
-if (second.createdFolders !== 0 || second.createdPages !== 0) process.exitCode = 1;
+if (second.createdFolders !== 0 || second.createdPages !== 0)
+  process.exitCode = 1;

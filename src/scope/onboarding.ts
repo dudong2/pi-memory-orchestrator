@@ -1,4 +1,4 @@
-import { basename, join, resolve } from "node:path";
+import { basename, resolve } from "node:path";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { OrchestratorConfig } from "../config.js";
 import { resolveGitContext } from "./git.js";
@@ -6,7 +6,9 @@ import {
   createProject,
   createScope,
   loadScopeCatalog,
+  type CreateScopeInput,
   type ProjectRecord,
+  type ScopeCatalog,
 } from "./catalog.js";
 import { resolveScope, type ResolvedScope } from "./resolver.js";
 
@@ -15,6 +17,54 @@ const WITHOUT_MEMORY = "기억 없이 계속";
 
 function suggestedName(root: string): string {
   return basename(resolve(root)) || "scope";
+}
+
+function hasScopeName(
+  catalog: ScopeCatalog,
+  projectId: string,
+  name: string,
+): boolean {
+  const key = name.trim().toLocaleLowerCase();
+  return Object.values(catalog.scopes).some(
+    (scope) =>
+      scope.projectId === projectId &&
+      scope.name.trim().toLocaleLowerCase() === key,
+  );
+}
+
+function availableScopeName(
+  catalog: ScopeCatalog,
+  projectId: string,
+  base: string,
+): string {
+  let suffix = 2;
+  while (hasScopeName(catalog, projectId, `${base}-${suffix}`)) suffix += 1;
+  return `${base}-${suffix}`;
+}
+
+async function chooseScopeName(
+  ctx: ExtensionContext,
+  config: OrchestratorConfig,
+  project: ProjectRecord,
+  root: string,
+): Promise<string | null> {
+  const inferred = suggestedName(root);
+  let catalog = await loadScopeCatalog(config.dataDir);
+  if (!hasScopeName(catalog, project.projectId, inferred)) return inferred;
+
+  let proposed = availableScopeName(catalog, project.projectId, inferred);
+  while (true) {
+    const input = await ctx.ui.input(
+      `Scope 이름 '${inferred}'이 이미 있습니다. 다른 이름`,
+      proposed,
+    );
+    if (input === undefined) return null;
+    const candidate = input.trim() || proposed;
+    catalog = await loadScopeCatalog(config.dataDir);
+    if (!hasScopeName(catalog, project.projectId, candidate)) return candidate;
+    ctx.ui.notify(`Scope 이름 '${candidate}'도 이미 사용 중입니다.`, "warning");
+    proposed = availableScopeName(catalog, project.projectId, inferred);
+  }
 }
 
 async function chooseProject(
@@ -64,22 +114,29 @@ export async function onboardScope(
     return null;
   }
 
-  const proposedScope = suggestedName(root);
-  const scopeInput = await ctx.ui.input("새 Scope 이름", proposedScope);
-  if (scopeInput === undefined) {
-    ctx.ui.notify("Scope 등록을 취소했습니다. 메모리 없이 계속합니다.", "info");
-    return null;
+  while (true) {
+    const scopeName = await chooseScopeName(ctx, config, project, root);
+    if (!scopeName) {
+      ctx.ui.notify("Scope 등록을 취소했습니다. 메모리 없이 계속합니다.", "info");
+      return null;
+    }
+    const input: CreateScopeInput = {
+      root,
+      projectId: project.projectId,
+      name: scopeName,
+      markerName: config.markerName,
+    };
+    if (git?.repositoryId) input.repositoryId = git.repositoryId;
+    await createScope(config.dataDir, input);
+    const created = await resolveScope(ctx.cwd, {
+      markerName: config.markerName,
+      dataDir: config.dataDir,
+      startCwd: ctx.cwd,
+    });
+    if (created) return created;
+    ctx.ui.notify(
+      `Scope 이름 '${scopeName}'이 동시에 등록됐습니다. 다른 이름을 선택하세요.`,
+      "warning",
+    );
   }
-  await createScope(config.dataDir, {
-    root,
-    projectId: project.projectId,
-    name: scopeInput.trim() || proposedScope,
-    ...(git?.repositoryId ? { repositoryId: git.repositoryId } : {}),
-    markerName: config.markerName,
-  });
-  return resolveScope(ctx.cwd, {
-    markerName: config.markerName,
-    dataDir: config.dataDir,
-    startCwd: ctx.cwd,
-  });
 }
