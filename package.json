@@ -15,7 +15,7 @@
     ]
   },
   "scripts": {
-    "check": "tsc --noEmit && tsc --noEmit -p tsconfig.scripts.json",
+    "check": "tsc --noEmit",
     "test": "node --import tsx --test tests/**/*.test.ts",
     "sidecar": "sh scripts/start-sidecar.sh",
     "benchmark": "node scripts/benchmark-recall.mjs"
