@@ -12,11 +12,13 @@ export interface GitContext {
 
 function git(cwd: string, args: string[]): string | undefined {
   try {
-    return execFileSync("git", ["-C", cwd, ...args], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-      timeout: 5_000,
-    }).trim() || undefined;
+    return (
+      execFileSync("git", ["-C", cwd, ...args], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+        timeout: 5_000,
+      }).trim() || undefined
+    );
   } catch {
     return undefined;
   }
@@ -30,24 +32,29 @@ export function canonicalizeGitRemote(remote: string): string | undefined {
   if (scp && !/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) {
     const [, host, remotePath] = scp;
     if (!host || !remotePath) return undefined;
-    const path = remotePath
-      .replace(/^\/+|\/+$/g, "")
-      .replace(/\.git$/i, "");
+    const path = remotePath.replace(/^\/+|\/+$/g, "").replace(/\.git$/i, "");
     return path ? `${host.toLowerCase()}/${path.toLowerCase()}` : undefined;
   }
 
   try {
     const url = new URL(value);
     if (url.protocol === "file:") return undefined;
-    const path = decodeURIComponent(url.pathname).replace(/^\/+|\/+$/g, "").replace(/\.git$/i, "");
-    return path ? `${url.hostname.toLowerCase()}/${path.toLowerCase()}` : undefined;
+    const path = decodeURIComponent(url.pathname)
+      .replace(/^\/+|\/+$/g, "")
+      .replace(/\.git$/i, "");
+    return path
+      ? `${url.hostname.toLowerCase()}/${path.toLowerCase()}`
+      : undefined;
   } catch {
     return undefined;
   }
 }
 
 function localRepositoryId(commonDir: string): string {
-  const digest = createHash("sha256").update(resolve(commonDir)).digest("hex").slice(0, 16);
+  const digest = createHash("sha256")
+    .update(resolve(commonDir))
+    .digest("hex")
+    .slice(0, 16);
   return `local/${digest}`;
 }
 
@@ -55,12 +62,20 @@ export function resolveGitContext(cwd: string): GitContext | null {
   const worktreeRoot = git(cwd, ["rev-parse", "--show-toplevel"]);
   if (!worktreeRoot) return null;
 
-  const absoluteCommon = git(cwd, ["rev-parse", "--path-format=absolute", "--git-common-dir"]);
+  const absoluteCommon = git(cwd, [
+    "rev-parse",
+    "--path-format=absolute",
+    "--git-common-dir",
+  ]);
   const fallbackCommon = git(cwd, ["rev-parse", "--git-common-dir"]);
-  const commonDir = resolve(absoluteCommon ?? resolve(cwd, fallbackCommon ?? ".git"));
-  const mainRoot = basename(commonDir) === ".git" ? dirname(commonDir) : worktreeRoot;
+  const commonDir = resolve(
+    absoluteCommon ?? resolve(cwd, fallbackCommon ?? ".git"),
+  );
+  const mainRoot =
+    basename(commonDir) === ".git" ? dirname(commonDir) : worktreeRoot;
   const remote = git(cwd, ["remote", "get-url", "origin"]);
-  const repositoryId = (remote && canonicalizeGitRemote(remote)) || localRepositoryId(commonDir);
+  const repositoryId =
+    (remote && canonicalizeGitRemote(remote)) || localRepositoryId(commonDir);
 
   return {
     worktreeRoot: resolve(worktreeRoot),

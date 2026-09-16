@@ -1,5 +1,14 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, readdir, rename, stat, unlink, utimes, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  readFile,
+  readdir,
+  rename,
+  stat,
+  unlink,
+  utimes,
+  writeFile,
+} from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { HindsightClient, RetainItem } from "./client.js";
 
@@ -31,15 +40,24 @@ export interface DrainResult {
 }
 
 export interface RetainOperations {
-  retain(bankId: string, request: { items: RetainItem[]; async: boolean; operation_id: string }, signal?: AbortSignal): Promise<unknown>;
-  operationStatus(bankId: string, operationId: string, signal?: AbortSignal): Promise<{ status: string; error?: unknown }>;
+  retain(
+    bankId: string,
+    request: { items: RetainItem[]; async: boolean; operation_id: string },
+    signal?: AbortSignal,
+  ): Promise<unknown>;
+  operationStatus(
+    bankId: string,
+    operationId: string,
+    signal?: AbortSignal,
+  ): Promise<{ status: string; error?: unknown }>;
 }
 
 export function deterministicOperationId(identity: string): string {
   const bytes = createHash("sha256").update(identity).digest().subarray(0, 16);
   const versionByte = bytes[6];
   const variantByte = bytes[8];
-  if (versionByte === undefined || variantByte === undefined) throw new Error("failed to derive operation UUID");
+  if (versionByte === undefined || variantByte === undefined)
+    throw new Error("failed to derive operation UUID");
   bytes[6] = (versionByte & 0x0f) | 0x50;
   bytes[8] = (variantByte & 0x3f) | 0x80;
   const hex = bytes.toString("hex");
@@ -48,14 +66,26 @@ export function deterministicOperationId(identity: string): string {
 
 function parseJob(content: string, path: string): RetainJob {
   let parsed: unknown;
-  try { parsed = JSON.parse(content) as unknown; } catch (error) {
-    throw new Error(`invalid outbox JSON ${path}: ${String(error)}`, { cause: error });
+  try {
+    parsed = JSON.parse(content) as unknown;
+  } catch (error) {
+    throw new Error(`invalid outbox JSON ${path}: ${String(error)}`, {
+      cause: error,
+    });
   }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error(`invalid outbox job ${path}`);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+    throw new Error(`invalid outbox job ${path}`);
   const job = parsed as Partial<RetainJob>;
-  if (job.version !== 1 || typeof job.id !== "string" || typeof job.operationId !== "string"
-      || typeof job.bankId !== "string" || !job.item || typeof job.item.content !== "string"
-      || typeof job.createdAt !== "string" || typeof job.attempts !== "number") {
+  if (
+    job.version !== 1 ||
+    typeof job.id !== "string" ||
+    typeof job.operationId !== "string" ||
+    typeof job.bankId !== "string" ||
+    !job.item ||
+    typeof job.item.content !== "string" ||
+    typeof job.createdAt !== "string" ||
+    typeof job.attempts !== "number"
+  ) {
     throw new Error(`invalid outbox job ${path}`);
   }
   return job as RetainJob;
@@ -64,7 +94,9 @@ function parseJob(content: string, path: string): RetainJob {
 async function writeAtomic(path: string, job: RetainJob): Promise<void> {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   const temporary = `${path}.tmp-${process.pid}-${randomUUID()}`;
-  await writeFile(temporary, `${JSON.stringify(job, null, 2)}\n`, { mode: 0o600 });
+  await writeFile(temporary, `${JSON.stringify(job, null, 2)}\n`, {
+    mode: 0o600,
+  });
   await rename(temporary, path);
 }
 
@@ -112,7 +144,9 @@ export class RetainOutbox {
     // Hindsight operation IDs are tenant-wide, not bank-scoped. Include the
     // destination bank so the same turn identity can be replayed into a shadow
     // or migration bank without colliding with the original operation.
-    const operationId = deterministicOperationId(`${input.bankId}:${input.identity}`);
+    const operationId = deterministicOperationId(
+      `${input.bankId}:${input.identity}`,
+    );
     const job: RetainJob = {
       version: 1,
       id: operationId,
@@ -154,10 +188,15 @@ export class RetainOutbox {
     return recovered;
   }
 
-  async drain(client: RetainOperations | HindsightClient, options: { signal?: AbortSignal; maxJobs?: number } = {}): Promise<DrainResult> {
+  async drain(
+    client: RetainOperations | HindsightClient,
+    options: { signal?: AbortSignal; maxJobs?: number } = {},
+  ): Promise<DrainResult> {
     await this.initialize();
     const result: DrainResult = { completed: 0, deferred: 0, failed: 0 };
-    const names = (await readdir(this.#pendingDir)).filter((name) => name.endsWith(".json")).sort((a, b) => a.localeCompare(b));
+    const names = (await readdir(this.#pendingDir))
+      .filter((name) => name.endsWith(".json"))
+      .sort((a, b) => a.localeCompare(b));
     for (const name of names.slice(0, options.maxJobs ?? names.length)) {
       if (options.signal?.aborted) break;
       const source = join(this.#pendingDir, name);
@@ -190,7 +229,11 @@ export class RetainOutbox {
       }
 
       try {
-        await client.retain(job.bankId, { items: [job.item], async: true, operation_id: job.operationId }, options.signal);
+        await client.retain(
+          job.bankId,
+          { items: [job.item], async: true, operation_id: job.operationId },
+          options.signal,
+        );
         await this.#waitForCompletion(client, job, options.signal);
         await unlink(claimed);
         result.completed++;
@@ -202,7 +245,10 @@ export class RetainOutbox {
           await unlink(claimed);
           result.failed++;
         } else {
-          const delay = Math.min(60_000, 1_000 * 2 ** Math.min(job.attempts - 1, 6));
+          const delay = Math.min(
+            60_000,
+            1_000 * 2 ** Math.min(job.attempts - 1, 6),
+          );
           job.nextAttemptAt = new Date(this.#clock() + delay).toISOString();
           await writeAtomic(source, job);
           await unlink(claimed);
@@ -213,9 +259,14 @@ export class RetainOutbox {
     return result;
   }
 
-  async counts(): Promise<{ pending: number; processing: number; failed: number }> {
+  async counts(): Promise<{
+    pending: number;
+    processing: number;
+    failed: number;
+  }> {
     await this.initialize();
-    const count = async (path: string) => (await readdir(path)).filter((name) => name.endsWith(".json")).length;
+    const count = async (path: string) =>
+      (await readdir(path)).filter((name) => name.endsWith(".json")).length;
     const [pending, processing, failed] = await Promise.all([
       count(this.#pendingDir),
       count(this.#processingDir),
@@ -224,18 +275,31 @@ export class RetainOutbox {
     return { pending, processing, failed };
   }
 
-  async #waitForCompletion(client: RetainOperations | HindsightClient, job: RetainJob, signal?: AbortSignal): Promise<void> {
+  async #waitForCompletion(
+    client: RetainOperations | HindsightClient,
+    job: RetainJob,
+    signal?: AbortSignal,
+  ): Promise<void> {
     const deadline = this.#clock() + this.#operationTimeoutMs;
     while (this.#clock() < deadline) {
-      if (signal?.aborted) throw signal.reason ?? new Error("outbox drain cancelled");
-      const operation = await client.operationStatus(job.bankId, job.operationId, signal);
+      if (signal?.aborted)
+        throw signal.reason ?? new Error("outbox drain cancelled");
+      const operation = await client.operationStatus(
+        job.bankId,
+        job.operationId,
+        signal,
+      );
       const status = operation.status.toLowerCase();
       if (status === "completed") return;
       if (status === "failed" || status === "cancelled") {
-        throw new Error(`Hindsight operation ${status}: ${JSON.stringify(operation.error ?? "unknown")}`);
+        throw new Error(
+          `Hindsight operation ${status}: ${JSON.stringify(operation.error ?? "unknown")}`,
+        );
       }
       await new Promise((resolve) => setTimeout(resolve, this.#pollIntervalMs));
     }
-    throw new Error(`Hindsight operation timed out after ${this.#operationTimeoutMs}ms`);
+    throw new Error(
+      `Hindsight operation timed out after ${this.#operationTimeoutMs}ms`,
+    );
   }
 }
