@@ -15,8 +15,15 @@ import {
 } from "./catalog.js";
 import { resolveScope, type ResolvedScope } from "./resolver.js";
 
+const GLOBAL_SCOPE = "global";
+const GLOBAL_SCOPE_DISAMBIGUATED = "global (전역 Scope)";
 const CREATE_PROJECT = "새 Project 만들기";
 const WITHOUT_MEMORY = "기억 없이 계속";
+
+type ProjectChoice =
+  | { kind: "global" }
+  | { kind: "project"; project: ProjectRecord }
+  | null;
 
 function suggestedName(root: string): string {
   return basename(resolve(root)) || "scope";
@@ -148,25 +155,41 @@ async function chooseProject(
   ctx: ExtensionContext,
   config: OrchestratorConfig,
   root: string,
-): Promise<ProjectRecord | null> {
+): Promise<ProjectChoice> {
   const catalog = await loadScopeCatalog(config.dataDir);
   const projects = Object.values(catalog.projects).sort((a, b) =>
     a.name.localeCompare(b.name),
   );
+  const hasGlobalScope = Object.values(catalog.scopes).some(
+    (scope) => scope.kind === "global",
+  );
+  const globalOption = projects.some(
+    (project) => project.name.toLocaleLowerCase() === GLOBAL_SCOPE,
+  )
+    ? GLOBAL_SCOPE_DISAMBIGUATED
+    : GLOBAL_SCOPE;
   const choice = await ctx.ui.select("이 위치의 메모리 Project를 선택하세요", [
+    ...(!hasGlobalScope ? [globalOption] : []),
     ...projects.map((project) => project.name),
     CREATE_PROJECT,
     WITHOUT_MEMORY,
   ]);
   if (!choice || choice === WITHOUT_MEMORY) return null;
+  if (!hasGlobalScope && choice === globalOption) return { kind: "global" };
   if (choice !== CREATE_PROJECT) {
     const selected = projects.find((project) => project.name === choice);
-    if (selected) return selected;
+    if (selected) return { kind: "project", project: selected };
   }
   const proposed = suggestedName(root);
   const input = await ctx.ui.input("새 Project 이름", proposed);
   if (input === undefined) return null;
-  return createProject(config.dataDir, input.trim() || proposed);
+  return {
+    kind: "project",
+    project: await createProject(
+      config.dataDir,
+      input.trim() || proposed,
+    ),
+  };
 }
 
 export async function onboardScope(
@@ -185,8 +208,8 @@ export async function onboardScope(
   const recovery = await recoverRenamedRepository(ctx, config, root);
   if (recovery.handled) return recovery.scope;
 
-  const project = await chooseProject(ctx, config, root);
-  if (!project) {
+  const choice = await chooseProject(ctx, config, root);
+  if (!choice) {
     ctx.ui.notify(
       "이 위치에서는 Hindsight와 Hermes Scope 메모리를 사용하지 않습니다.",
       "info",
@@ -194,6 +217,24 @@ export async function onboardScope(
     return null;
   }
 
+  if (choice.kind === "global") {
+    await createScope(config.dataDir, {
+      root,
+      name: GLOBAL_SCOPE,
+      kind: "global",
+      markerName: config.markerName,
+    });
+    const created = await resolveScope(ctx.cwd, {
+      markerName: config.markerName,
+      dataDir: config.dataDir,
+      startCwd: ctx.cwd,
+    });
+    if (created) return created;
+    ctx.ui.notify("global Scope를 등록했지만 다시 해석하지 못했습니다.", "error");
+    return null;
+  }
+
+  const { project } = choice;
   while (true) {
     const scopeName = await chooseScopeName(ctx, config, project, root);
     if (!scopeName) {

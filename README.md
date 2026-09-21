@@ -73,11 +73,14 @@ flowchart TD
     Rebind -->|Yes| Bind
     Rebind -->|No| Disabled[Disable Scope memory for this session]
     Resolve -->|No marker or catalog match| Choose{User choice}
+    Choose --> Global[Choose global if no global Scope is registered]
     Choose --> Existing[Choose existing Project]
     Choose --> New[Create new Project]
     Choose --> None[Continue without memory]
+    Global --> GlobalScope[Register this location as the global Scope]
     Existing --> Scope[Create Scope with folder name]
     New --> First[Create Project and folder-named Scope]
+    GlobalScope --> Bind
     Scope --> Bind
     First --> Bind
     None --> Disabled
@@ -93,6 +96,8 @@ Resolution rules:
 - When a marker still identifies a registered Scope but its canonical remote changed, startup asks for explicit confirmation before rebinding that existing Scope. Declining never falls through to new-Scope onboarding.
 - Existing canonical remote identities are never rewritten without that confirmation.
 - An unregistered location never creates a Scope automatically.
+- Exactly one `kind: "global"` Scope may be registered. When none exists, onboarding offers `global` in the Project selection; once registered, the option is hidden and catalog writes reject another global Scope.
+- The global Scope can move with its marker-bearing directory. Resolution preserves its `scopeId` and `scope:global` memory tag while refreshing catalog paths.
 - A new Scope automatically uses the repository-root or registration-directory basename. The user is asked for a different name only when that Project already contains the same Scope name.
 
 Choosing **continue without memory** creates no marker and no catalog suppression record. Hindsight Scope memory and Hermes Scope memory are disabled only for that session. A new session asks again.

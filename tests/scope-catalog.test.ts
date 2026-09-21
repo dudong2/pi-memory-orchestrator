@@ -59,6 +59,65 @@ test("a registered scope resolves through its explicit project", async () => {
   assert.equal(scope?.scopeTag, registered.memoryTag);
 });
 
+test("only one global Scope can be registered", async () => {
+  const root = await tempRoot("memory-catalog-global-unique-");
+  const dataDir = join(root, "state");
+  const firstRoot = join(root, "first");
+  const secondRoot = join(root, "second");
+  await mkdir(firstRoot);
+  await mkdir(secondRoot);
+  const registered = await createScope(dataDir, {
+    root: firstRoot,
+    name: "global",
+    kind: "global",
+  });
+
+  await assert.rejects(
+    createScope(dataDir, {
+      root: secondRoot,
+      name: "global",
+      kind: "global",
+    }),
+    /global Scope is already registered/,
+  );
+
+  const catalog = await loadScopeCatalog(dataDir);
+  assert.deepEqual(
+    Object.values(catalog.scopes).map((scope) => scope.scopeId),
+    [registered.scopeId],
+  );
+  await assert.rejects(access(join(secondRoot, ".pi-memory-scope.json")));
+});
+
+test("moving the global Scope preserves its identity and global memory tag", async () => {
+  const parent = await tempRoot("memory-catalog-global-move-");
+  const first = join(parent, "first");
+  const second = join(parent, "second");
+  const dataDir = join(parent, "state");
+  await mkdir(first);
+  const registered = await createScope(dataDir, {
+    root: first,
+    name: "global",
+    kind: "global",
+  });
+  await rename(first, second);
+
+  const scope = await resolveScope(second, { dataDir, startCwd: second });
+
+  assert.equal(scope?.scopeId, registered.scopeId);
+  assert.equal(scope?.kind, "global");
+  assert.equal(scope?.scopeTag, "scope:global");
+  const catalog = await loadScopeCatalog(dataDir);
+  assert.equal(
+    catalog.scopes[registered.scopeId]?.markerPath,
+    join(second, ".pi-memory-scope.json"),
+  );
+  assert.equal(
+    catalog.scopes[registered.scopeId]?.paths.includes(await realpath(second)),
+    true,
+  );
+});
+
 test("a child directory does not inherit an ancestor scope", async () => {
   const root = await tempRoot("memory-catalog-no-ancestor-");
   const child = join(root, "child");

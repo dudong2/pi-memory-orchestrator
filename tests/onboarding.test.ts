@@ -24,12 +24,14 @@ function context(
   inputPrompts: string[] = [],
   confirmations: boolean[] = [],
   selectPrompts: string[] = [],
+  selectOptions: string[][] = [],
 ): ExtensionContext {
   return {
     cwd,
     ui: {
-      select: async (title: string) => {
+      select: async (title: string, options: string[]) => {
         selectPrompts.push(title);
+        selectOptions.push(options);
         return choices.shift();
       },
       input: async (title: string) => {
@@ -48,6 +50,55 @@ test("choosing no memory leaves an unregistered directory untouched", async () =
   const scope = await onboardScope(context(root, ["기억 없이 계속"]), config);
   assert.equal(scope, null);
   await assert.rejects(access(join(root, config.markerName)));
+});
+
+test("choosing global registers the sole global Scope when it is missing", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memory-onboarding-global-"));
+  const config = { ...DEFAULT_CONFIG, dataDir: join(root, "state") };
+  const selectOptions: string[][] = [];
+
+  const scope = await onboardScope(
+    context(root, ["global"], [], [], [], [], selectOptions),
+    config,
+  );
+
+  assert.equal(scope?.kind, "global");
+  assert.equal(scope?.scopeName, "global");
+  assert.equal(scope?.projectId, undefined);
+  assert.equal(scope?.scopeTag, "scope:global");
+  assert.equal(selectOptions[0]?.includes("global"), true);
+  await access(join(root, config.markerName));
+});
+
+test("Project selection omits global when a global Scope is registered", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memory-onboarding-global-exists-"));
+  const globalRoot = join(root, "global");
+  const launch = join(root, "service");
+  await mkdir(globalRoot);
+  await mkdir(launch);
+  const config = { ...DEFAULT_CONFIG, dataDir: join(root, "state") };
+  await createScope(config.dataDir, {
+    root: globalRoot,
+    name: "global",
+    kind: "global",
+  });
+  const selectOptions: string[][] = [];
+
+  const scope = await onboardScope(
+    context(
+      launch,
+      ["기억 없이 계속"],
+      [],
+      [],
+      [],
+      [],
+      selectOptions,
+    ),
+    config,
+  );
+
+  assert.equal(scope, null);
+  assert.equal(selectOptions[0]?.includes("global"), false);
 });
 
 test("choosing an existing Project names the Scope from its directory without prompting", async () => {

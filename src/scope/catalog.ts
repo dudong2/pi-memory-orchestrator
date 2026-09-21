@@ -314,6 +314,15 @@ export async function createScope(
     if (kind !== "global" && (!projectId || !catalog.projects[projectId])) {
       throw new Error(`unknown projectId: ${String(projectId)}`);
     }
+    if (
+      kind === "global" &&
+      Object.values(catalog.scopes).some(
+        (scope) =>
+          scope.kind === "global" && scope.scopeId !== input.scopeId,
+      )
+    ) {
+      throw new Error("global Scope is already registered");
+    }
     const name = normalizedName(input.name, "scope name");
     if (kind !== "global") {
       const duplicate = Object.values(catalog.scopes).find(
