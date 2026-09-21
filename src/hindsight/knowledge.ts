@@ -163,15 +163,16 @@ export async function ensureKnowledgeViews(
     signal,
   );
   if (scopeFolder.created) createdFolders++;
+  const currentPageName = scope.repositoryId
+    ? `Repository: ${scope.repositoryId.split("/").slice(-2).join("/")}`
+    : "Scope overview";
   if (
     await ensurePage(
       api,
       bankId,
       scopeFolder.children,
       {
-        name: scope.repositoryId
-          ? `Repository: ${scope.repositoryId.split("/").slice(-2).join("/")}`
-          : "Scope overview",
+        name: currentPageName,
         source_query:
           "Maintain a concise current scope overview covering architecture, conventions, decisions, pitfalls, corrections, and active initiatives. Explain temporal changes rather than silently replacing history.",
         parent_id: scopeFolder.id,
@@ -185,6 +186,23 @@ export async function ensureKnowledgeViews(
     createdPages++;
 
   if (api.deleteKnowledgeNode) {
+    for (const candidatePage of scopeFolder.children) {
+      const tags = Array.isArray(candidatePage.tags)
+        ? candidatePage.tags
+        : [];
+      const generatedPage =
+        candidatePage.name === "Scope overview" ||
+        candidatePage.name.startsWith("Repository: ");
+      if (
+        candidatePage.kind === "page" &&
+        candidatePage.name !== currentPageName &&
+        generatedPage &&
+        tags.includes(scope.scopeTag)
+      ) {
+        await api.deleteKnowledgeNode(bankId, candidatePage.id, signal);
+      }
+    }
+
     const currentProjectName = `${scope.projectName} [${scope.projectId}]`;
     const scopeIdSuffix = ` [${scope.scopeId}]`;
     for (const candidateProject of root.children) {

@@ -28,6 +28,7 @@ import {
   projectByName,
   qualifiedScopeName,
   reassignScopeProject,
+  removeProjectIfEmpty,
   type ScopeCatalog,
 } from "./scope/catalog.js";
 import { onboardScope } from "./scope/onboarding.js";
@@ -219,6 +220,7 @@ export function createMemoryOrchestratorExtension(
     let currentScope: ResolvedScope | null = null;
     let scopeCwd = "";
     let scopeResolved = false;
+    let scopeOnboardingComplete = false;
     let latestUserInput = "";
     let pendingRecall: PendingRecall | null = null;
     let turnCounter = 0;
@@ -228,19 +230,31 @@ export function createMemoryOrchestratorExtension(
     const ensureScope = async (
       cwd: string,
       ctx?: ExtensionContext,
+      allowOnboarding = ctx?.mode !== "rpc",
     ): Promise<ResolvedScope | null> => {
-      if (scopeResolved && scopeCwd === cwd) return currentScope;
-      currentScope = await scopeResolver(cwd);
+      const canOnboard = Boolean(
+        allowOnboarding &&
+          ctx &&
+          typeof ctx.ui?.select === "function" &&
+          !dependencies.scopeResolver,
+      );
+      const matchesCachedCwd = scopeResolved && scopeCwd === cwd;
       if (
-        !currentScope &&
-        ctx &&
-        typeof ctx.ui?.select === "function" &&
-        !dependencies.scopeResolver
+        matchesCachedCwd &&
+        (currentScope || !canOnboard || scopeOnboardingComplete)
       ) {
-        currentScope = await onboardScope(ctx, config);
+        return currentScope;
       }
-      scopeCwd = cwd;
-      scopeResolved = true;
+      if (!matchesCachedCwd) {
+        currentScope = await scopeResolver(cwd);
+        scopeCwd = cwd;
+        scopeResolved = true;
+        scopeOnboardingComplete = false;
+      }
+      if (!currentScope && canOnboard && ctx && !scopeOnboardingComplete) {
+        currentScope = await onboardScope(ctx, config);
+        scopeOnboardingComplete = true;
+      }
       return currentScope;
     };
 
@@ -251,7 +265,7 @@ export function createMemoryOrchestratorExtension(
       const recall: PendingRecall = {
         prompt,
         cwd: ctx.cwd,
-        promise: ensureScope(ctx.cwd, ctx).then(async (scope) => ({
+        promise: ensureScope(ctx.cwd, ctx, true).then(async (scope) => ({
           scope,
           outcome: scope
             ? await provider.recall(prompt, scope, { signal: ctx.signal })
@@ -442,6 +456,18 @@ export function createMemoryOrchestratorExtension(
           return;
         }
 
+        let removedSourceProject = false;
+        try {
+          removedSourceProject = Boolean(
+            await removeProjectIfEmpty(config.dataDir, previousScope.projectId),
+          );
+        } catch (error) {
+          ctx.ui.notify(
+            `Scope는 재소속됐지만 빈 원본 Project 정리는 지연됐습니다: ${error instanceof Error ? error.message : String(error)}`,
+            "warning",
+          );
+        }
+
         currentScope = nextScope;
         scopeCwd = ctx.cwd;
         scopeResolved = true;
@@ -454,7 +480,12 @@ export function createMemoryOrchestratorExtension(
           );
         }
         ctx.ui.notify(
-          `${before} → ${after}로 재소속했습니다. scopeId와 memoryTag는 유지됐습니다.`,
+          [
+            `${before} → ${after}로 재소속했습니다. scopeId와 memoryTag는 유지됐습니다.`,
+            ...(removedSourceProject
+              ? [`빈 Project '${previousScope.projectName}'도 정리했습니다.`]
+              : []),
+          ].join("\n"),
           "info",
         );
         await ctx.reload();
@@ -483,6 +514,7 @@ export function createMemoryOrchestratorExtension(
       latestUserInput = "";
       pendingRecall = null;
       turnCounter = 0;
+      scopeOnboardingComplete = false;
       if (!(scopeResolved && scopeCwd === ctx.cwd)) {
         currentScope = null;
         scopeCwd = "";
@@ -502,11 +534,15 @@ export function createMemoryOrchestratorExtension(
       });
     });
 
-    pi.on("input", (event: InputEvent, ctx) => {
+    pi.on("input", async (event: InputEvent, ctx) => {
       if (event.source === "extension") return;
       latestUserInput = event.text.trim();
-      if (config.mode === "active" && latestUserInput)
+      if (!latestUserInput) return;
+      if (config.mode === "active") {
         startRecall(latestUserInput, ctx);
+      } else if (ctx.mode === "rpc") {
+        await ensureScope(ctx.cwd, ctx, true);
+      }
     });
 
     pi.on("before_agent_start", async (event, ctx) => {

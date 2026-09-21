@@ -45,6 +45,7 @@ class FakeKnowledgeApi implements KnowledgeApi {
       kind: "page",
       parent_id: request.parent_id,
       children: [],
+      tags: request.tags,
     };
     this.find(this.roots, request.parent_id!)?.children?.push(node);
     this.pages.push(request);
@@ -94,6 +95,24 @@ test("a repository marker creates one strictly filtered knowledge page", async (
     assert.deepEqual(page.trigger?.fact_types, ["observation"]);
     assert.equal(page.trigger?.mode, "delta");
   }
+});
+
+test("renaming a repository removes the stale generated Knowledge page", async () => {
+  const api = new FakeKnowledgeApi();
+  await ensureKnowledgeViews(api, "bank", scope);
+  const renamed: typeof scope = {
+    ...scope,
+    repositoryId: "github.com/acme/frontend-renamed",
+  };
+
+  await ensureKnowledgeViews(api, "bank", renamed);
+
+  const project = api.roots[0]?.children?.[0];
+  const scopeFolder = project?.children?.[0];
+  assert.deepEqual(
+    scopeFolder?.children?.map((node) => node.name),
+    ["Repository: acme/frontend-renamed"],
+  );
 });
 
 test("reassigning a Scope removes its stale Knowledge location", async () => {

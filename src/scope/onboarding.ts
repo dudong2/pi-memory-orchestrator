@@ -1,4 +1,4 @@
-import { basename, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { OrchestratorConfig } from "../config.js";
 import { resolveGitContext } from "./git.js";
@@ -6,6 +6,9 @@ import {
   createProject,
   createScope,
   loadScopeCatalog,
+  readScopeMarker,
+  rebindScopeRepositoryId,
+  resolveCatalogRecord,
   type CreateScopeInput,
   type ProjectRecord,
   type ScopeCatalog,
@@ -67,6 +70,80 @@ async function chooseScopeName(
   }
 }
 
+async function recoverRenamedRepository(
+  ctx: ExtensionContext,
+  config: OrchestratorConfig,
+  root: string,
+): Promise<{ handled: boolean; scope: ResolvedScope | null }> {
+  const git = resolveGitContext(ctx.cwd);
+  if (!git || git.repositoryId.startsWith("local/")) {
+    return { handled: false, scope: null };
+  }
+
+  let registered;
+  try {
+    const marker = await readScopeMarker(join(root, config.markerName));
+    registered = await resolveCatalogRecord(config.dataDir, marker);
+  } catch {
+    return { handled: false, scope: null };
+  }
+  const previousRepositoryId = registered.scope.repositoryId;
+  if (
+    registered.scope.kind !== "repository" ||
+    !previousRepositoryId ||
+    previousRepositoryId === git.repositoryId
+  ) {
+    return { handled: false, scope: null };
+  }
+
+  const confirmed = await ctx.ui.confirm(
+    "저장소 연결 변경 감지",
+    [
+      `기존: ${previousRepositoryId}`,
+      `현재: ${git.repositoryId}`,
+      "기존 Scope와 현재 저장소의 연결을 갱신할까요?",
+    ].join("\n"),
+  );
+  if (!confirmed) {
+    ctx.ui.notify(
+      "저장소 연결 갱신을 취소했습니다. Project를 다시 선택하지 않고 메모리 없이 계속합니다.",
+      "warning",
+    );
+    return { handled: true, scope: null };
+  }
+
+  const rebound = await rebindScopeRepositoryId(
+    config.dataDir,
+    registered.scope.scopeId,
+    previousRepositoryId,
+    git.repositoryId,
+  );
+  if (!rebound) {
+    ctx.ui.notify(
+      "저장소 연결을 갱신하지 못했습니다. 다른 Scope가 현재 저장소 identity를 사용 중인지 확인하세요.",
+      "error",
+    );
+    return { handled: true, scope: null };
+  }
+  const scope = await resolveScope(ctx.cwd, {
+    markerName: config.markerName,
+    dataDir: config.dataDir,
+    startCwd: ctx.cwd,
+  });
+  if (!scope) {
+    ctx.ui.notify(
+      "저장소 연결은 갱신됐지만 Scope를 다시 해석하지 못했습니다.",
+      "error",
+    );
+    return { handled: true, scope: null };
+  }
+  ctx.ui.notify(
+    `저장소 연결을 ${previousRepositoryId} → ${git.repositoryId}로 갱신했습니다.`,
+    "info",
+  );
+  return { handled: true, scope };
+}
+
 async function chooseProject(
   ctx: ExtensionContext,
   config: OrchestratorConfig,
@@ -105,6 +182,9 @@ export async function onboardScope(
 
   const git = resolveGitContext(ctx.cwd);
   const root = resolve(git?.mainRoot ?? ctx.cwd);
+  const recovery = await recoverRenamedRepository(ctx, config, root);
+  if (recovery.handled) return recovery.scope;
+
   const project = await chooseProject(ctx, config, root);
   if (!project) {
     ctx.ui.notify(

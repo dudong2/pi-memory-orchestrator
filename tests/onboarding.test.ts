@@ -1,27 +1,42 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { access, mkdir, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { DEFAULT_CONFIG } from "../src/config.js";
-import { createProject, createScope } from "../src/scope/catalog.js";
+import {
+  createProject,
+  createScope,
+  loadScopeCatalog,
+} from "../src/scope/catalog.js";
 import { onboardScope } from "../src/scope/onboarding.js";
+
+function git(cwd: string, ...args: string[]): string {
+  return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8" }).trim();
+}
 
 function context(
   cwd: string,
   choices: string[],
   inputs: string[] = [],
   inputPrompts: string[] = [],
+  confirmations: boolean[] = [],
+  selectPrompts: string[] = [],
 ): ExtensionContext {
   return {
     cwd,
     ui: {
-      select: async () => choices.shift(),
+      select: async (title: string) => {
+        selectPrompts.push(title);
+        return choices.shift();
+      },
       input: async (title: string) => {
         inputPrompts.push(title);
         return inputs.shift();
       },
+      confirm: async () => confirmations.shift() ?? false,
       notify: () => undefined,
     },
   } as unknown as ExtensionContext;
@@ -50,6 +65,74 @@ test("choosing an existing Project names the Scope from its directory without pr
   assert.equal(scope?.scopeName, "service");
   assert.deepEqual(inputPrompts, []);
   await access(join(launch, config.markerName));
+});
+
+test("a renamed repository rebinds the existing Scope without Project onboarding", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memory-onboarding-rename-"));
+  const config = { ...DEFAULT_CONFIG, dataDir: join(root, "state") };
+  git(root, "init", "-q");
+  git(root, "remote", "add", "origin", "git@github.com:dudong2/before.git");
+  const project = await createProject(config.dataDir, "Trading");
+  const registered = await createScope(config.dataDir, {
+    root,
+    projectId: project.projectId,
+    name: "signals",
+    repositoryId: "github.com/dudong2/before",
+  });
+  git(
+    root,
+    "remote",
+    "set-url",
+    "origin",
+    "git@github.com:dudong2/after.git",
+  );
+  const selectPrompts: string[] = [];
+
+  const scope = await onboardScope(
+    context(root, [], [], [], [true], selectPrompts),
+    config,
+  );
+
+  assert.equal(scope?.scopeId, registered.scopeId);
+  assert.equal(scope?.scopeTag, registered.memoryTag);
+  assert.equal(scope?.projectId, project.projectId);
+  assert.equal(scope?.repositoryId, "github.com/dudong2/after");
+  assert.deepEqual(selectPrompts, []);
+});
+
+test("declining a repository rebind does not fall through to Project onboarding", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memory-onboarding-decline-"));
+  const config = { ...DEFAULT_CONFIG, dataDir: join(root, "state") };
+  git(root, "init", "-q");
+  git(root, "remote", "add", "origin", "git@github.com:dudong2/before.git");
+  const project = await createProject(config.dataDir, "Trading");
+  const registered = await createScope(config.dataDir, {
+    root,
+    projectId: project.projectId,
+    name: "signals",
+    repositoryId: "github.com/dudong2/before",
+  });
+  git(
+    root,
+    "remote",
+    "set-url",
+    "origin",
+    "git@github.com:dudong2/after.git",
+  );
+  const selectPrompts: string[] = [];
+
+  const scope = await onboardScope(
+    context(root, [], [], [], [false], selectPrompts),
+    config,
+  );
+
+  assert.equal(scope, null);
+  assert.deepEqual(selectPrompts, []);
+  const catalog = await loadScopeCatalog(config.dataDir);
+  assert.equal(
+    catalog.scopes[registered.scopeId]?.repositoryId,
+    "github.com/dudong2/before",
+  );
 });
 
 test("a duplicate directory name prompts for a unique Scope name", async () => {

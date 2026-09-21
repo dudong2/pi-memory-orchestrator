@@ -53,13 +53,13 @@ Current catalog shape:
 | Project | Member Scopes |
 | --- | --- |
 | `LuckyCat` | `LuckyCat` |
-| `auto-trading` | `auto-trading` |
 | `automation` | `automation` |
 | `cancel-ticket` | `cancel-ticket` |
 | `certen-io` | `certen-io` |
 | `character-ai-chat` | `ai-chat-engine` |
 | `pi-memory-orchestrator` | `pi-memory-orchestrator` |
 | `stablelabs` | `stable`, `stable-bft`, `stable-evm`, `stable-geth`, `stable-sdk` |
+| `trading` | `auto-trading` |
 
 `stablelabs` demonstrates the intended relationship: five sibling repositories are independent Scopes in one Project. The parent `stablelabs/` directory is not a Scope and has no marker.
 
@@ -69,7 +69,10 @@ Current catalog shape:
 flowchart TD
     Start[Pi / OMP session starts] --> Resolve{Exact marker or unambiguous catalog recovery?}
     Resolve -->|Yes| Bind[Bind Project and current Scope]
-    Resolve -->|No| Choose{User choice}
+    Resolve -->|Repository identity changed| Rebind{Confirm existing Scope rebind?}
+    Rebind -->|Yes| Bind
+    Rebind -->|No| Disabled[Disable Scope memory for this session]
+    Resolve -->|No marker or catalog match| Choose{User choice}
     Choose --> Existing[Choose existing Project]
     Choose --> New[Create new Project]
     Choose --> None[Continue without memory]
@@ -77,7 +80,7 @@ flowchart TD
     New --> First[Create Project and folder-named Scope]
     Scope --> Bind
     First --> Bind
-    None --> Disabled[Disable Scope memory for this session only]
+    None --> Disabled
 ```
 
 Resolution rules:
@@ -86,7 +89,9 @@ Resolution rules:
 - Outside Git, only the exact launch-directory marker is considered.
 - Filesystem ancestors are never inherited.
 - A missing marker is restored only when repository or portable-path identity matches exactly one catalog Scope.
-- When a repository gains its first canonical `origin`, its matching `local/...` identity is promoted without changing `scopeId` or memory. Existing canonical remote identities are never rewritten automatically.
+- When a repository gains its first canonical `origin`, its matching `local/...` identity is promoted without changing `scopeId` or memory.
+- When a marker still identifies a registered Scope but its canonical remote changed, startup asks for explicit confirmation before rebinding that existing Scope. Declining never falls through to new-Scope onboarding.
+- Existing canonical remote identities are never rewritten without that confirmation.
 - An unregistered location never creates a Scope automatically.
 - A new Scope automatically uses the repository-root or registration-directory basename. The user is asked for a different name only when that Project already contains the same Scope name.
 
@@ -243,7 +248,7 @@ Coding Projects
     └── stable-sdk
 ```
 
-Each Scope page uses a strict tag filter. There is no filesystem-parent knowledge folder.
+Each Scope page uses a strict tag filter. There is no filesystem-parent knowledge folder. Reassignment removes the stale Scope location, and repository rebinding replaces stale generated repository pages instead of leaving duplicate views.
 
 ## Storage map
 
@@ -265,7 +270,7 @@ Each Scope page uses a strict tag filter. There is no filesystem-parent knowledg
 - `long_memory`: scoped Hindsight search, retain, correct, and forget.
 - Hermes `memory_*` tools: bounded global/user/failure/current-Scope memory.
 
-Project/Scope creation remains interactive. Scope reassignment requires an explicit confirmation and reloads the extensions after synchronizing the catalog, marker, Hermes metadata, and Hindsight Knowledge view.
+Project/Scope creation remains interactive. Scope reassignment requires an explicit confirmation and reloads the extensions after synchronizing the catalog, marker, Hermes metadata, and Hindsight Knowledge view. If the reassigned Scope was the source Project's final member, that now-empty source Project is removed from the catalog.
 
 ## Hermes integration patch
 

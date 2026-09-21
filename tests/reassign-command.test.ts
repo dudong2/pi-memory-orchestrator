@@ -133,6 +133,8 @@ test("/memory-reassign-scope reassigns the current Scope and reloads extensions"
     catalog.scopes[setup.registered.scopeId]?.projectId,
     setup.target.projectId,
   );
+  assert.equal(catalog.projects[setup.source.projectId], undefined);
+  assert.ok(catalog.projects[setup.target.projectId]);
   assert.equal(
     catalog.scopes[setup.registered.scopeId]?.memoryTag,
     setup.registered.memoryTag,

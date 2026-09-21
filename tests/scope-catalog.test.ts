@@ -19,6 +19,7 @@ import {
   loadScopeCatalog,
   projectByName,
   reassignScopeProject,
+  rebindScopeRepositoryId,
   removeScope,
 } from "../src/scope/catalog.js";
 import { resolveGitContext } from "../src/scope/git.js";
@@ -159,6 +160,42 @@ test("changing an existing remote does not rewrite repository identity", async (
   assert.equal(
     catalog.scopes[registered.scopeId]?.repositoryId,
     "github.com/dudong2/original",
+  );
+});
+
+test("explicit repository rebinding rejects an identity owned by another Scope", async () => {
+  const root = await tempRoot("memory-catalog-rebind-conflict-");
+  const dataDir = join(root, "state");
+  const firstRoot = join(root, "first");
+  const secondRoot = join(root, "second");
+  await mkdir(firstRoot);
+  await mkdir(secondRoot);
+  const project = await createProject(dataDir, "Repository Rebind");
+  const first = await createScope(dataDir, {
+    root: firstRoot,
+    projectId: project.projectId,
+    name: "first",
+    repositoryId: "github.com/dudong2/first",
+  });
+  await createScope(dataDir, {
+    root: secondRoot,
+    projectId: project.projectId,
+    name: "second",
+    repositoryId: "github.com/dudong2/second",
+  });
+
+  const rebound = await rebindScopeRepositoryId(
+    dataDir,
+    first.scopeId,
+    "github.com/dudong2/first",
+    "github.com/dudong2/second",
+  );
+
+  assert.equal(rebound, null);
+  const catalog = await loadScopeCatalog(dataDir);
+  assert.equal(
+    catalog.scopes[first.scopeId]?.repositoryId,
+    "github.com/dudong2/first",
   );
 });
 

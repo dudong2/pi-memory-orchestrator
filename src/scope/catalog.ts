@@ -453,6 +453,44 @@ export async function reassignScopeProject(
   }
 }
 
+export async function rebindScopeRepositoryId(
+  dataDir: string,
+  scopeId: string,
+  expectedRepositoryId: string,
+  repositoryId: string,
+): Promise<ScopeRecord | null> {
+  if (!expectedRepositoryId || !repositoryId) return null;
+  const path = catalogPath(dataDir);
+  const release = await acquireLock(`${path}.lock`);
+  try {
+    const catalog = await loadScopeCatalog(dataDir);
+    const current = catalog.scopes[scopeId];
+    if (
+      !current ||
+      current.kind !== "repository" ||
+      current.repositoryId !== expectedRepositoryId
+    ) {
+      return null;
+    }
+    if (expectedRepositoryId === repositoryId) return current;
+    const conflict = Object.values(catalog.scopes).some(
+      (scope) =>
+        scope.scopeId !== scopeId && scope.repositoryId === repositoryId,
+    );
+    if (conflict) return null;
+    const next: ScopeRecord = {
+      ...current,
+      repositoryId,
+      updatedAt: new Date().toISOString(),
+    };
+    catalog.scopes[scopeId] = next;
+    await writeJsonAtomic(path, catalog);
+    return next;
+  } finally {
+    await release();
+  }
+}
+
 export async function promoteScopeRepositoryId(
   dataDir: string,
   scopeId: string,
@@ -465,34 +503,12 @@ export async function promoteScopeRepositoryId(
   ) {
     return null;
   }
-  const path = catalogPath(dataDir);
-  const release = await acquireLock(`${path}.lock`);
-  try {
-    const catalog = await loadScopeCatalog(dataDir);
-    const current = catalog.scopes[scopeId];
-    if (
-      !current ||
-      current.kind !== "repository" ||
-      current.repositoryId !== expectedLocalRepositoryId
-    ) {
-      return null;
-    }
-    const conflict = Object.values(catalog.scopes).some(
-      (scope) =>
-        scope.scopeId !== scopeId && scope.repositoryId === remoteRepositoryId,
-    );
-    if (conflict) return null;
-    const next: ScopeRecord = {
-      ...current,
-      repositoryId: remoteRepositoryId,
-      updatedAt: new Date().toISOString(),
-    };
-    catalog.scopes[scopeId] = next;
-    await writeJsonAtomic(path, catalog);
-    return next;
-  } finally {
-    await release();
-  }
+  return rebindScopeRepositoryId(
+    dataDir,
+    scopeId,
+    expectedLocalRepositoryId,
+    remoteRepositoryId,
+  );
 }
 
 export async function updateScopeLocation(
@@ -582,6 +598,28 @@ export async function removeScope(
     delete catalog.scopes[scopeId];
     await writeJsonAtomic(path, catalog);
     return scope;
+  } finally {
+    await release();
+  }
+}
+
+export async function removeProjectIfEmpty(
+  dataDir: string,
+  projectId: string,
+): Promise<ProjectRecord | null> {
+  const path = catalogPath(dataDir);
+  const release = await acquireLock(`${path}.lock`);
+  try {
+    const catalog = await loadScopeCatalog(dataDir);
+    const project = catalog.projects[projectId];
+    if (!project) return null;
+    const hasScopes = Object.values(catalog.scopes).some(
+      (scope) => scope.projectId === projectId,
+    );
+    if (hasScopes) return null;
+    delete catalog.projects[projectId];
+    await writeJsonAtomic(path, catalog);
+    return project;
   } finally {
     await release();
   }

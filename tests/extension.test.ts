@@ -15,6 +15,7 @@ function harness(
   mode: "shadow" | "active",
   resolvedScope: ResolvedScope | null = scope,
   dataDir = "/tmp/pi-memory-orchestrator-extension-test",
+  useDefaultScopeResolver = false,
 ) {
   const handlers = new Map<string, Function[]>();
   const tools: unknown[] = [];
@@ -86,7 +87,9 @@ function harness(
   createMemoryOrchestratorExtension({
     config,
     provider,
-    scopeResolver: async () => resolvedScope,
+    ...(useDefaultScopeResolver
+      ? {}
+      : { scopeResolver: async () => resolvedScope }),
     clock: () => Date.parse("2026-09-14T00:00:00.000Z"),
   })(pi);
   return { handlers, tools, commands, calls, notifications };
@@ -94,17 +97,113 @@ function harness(
 
 function context(
   notifications: Array<{ message: string; level: string }> = [],
+  options: {
+    cwd?: string;
+    mode?: "tui" | "rpc";
+    select?: (title: string, options: string[]) => Promise<string | undefined>;
+  } = {},
 ) {
   return {
-    cwd: "/tmp/project",
+    cwd: options.cwd ?? "/tmp/project",
+    mode: options.mode ?? "tui",
     signal: new AbortController().signal,
     sessionManager: { getSessionId: () => "session-1" },
     ui: {
       notify: (message: string, level: string) =>
         notifications.push({ message, level }),
+      select: options.select,
     },
   };
 }
+
+test("RPC startup defers Scope onboarding until the first user input", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memory-rpc-onboarding-"));
+  const runtime = harness("active", null, join(root, "state"), true);
+  let selections = 0;
+  const ctx = context(runtime.notifications, {
+    cwd: root,
+    mode: "rpc",
+    select: async () => {
+      selections++;
+      return "기억 없이 계속";
+    },
+  });
+
+  await runtime.handlers.get("session_start")?.[0]?.({}, ctx);
+  assert.equal(selections, 0);
+
+  await runtime.handlers.get("input")?.[0]?.(
+    { text: "question", source: "rpc" },
+    ctx,
+  );
+  await runtime.handlers.get("before_agent_start")?.[0]?.(
+    { prompt: "question", systemPrompt: "base" },
+    ctx,
+  );
+  assert.equal(selections, 1);
+
+  await runtime.handlers.get("input")?.[0]?.(
+    { text: "another question", source: "rpc" },
+    ctx,
+  );
+  await runtime.handlers.get("before_agent_start")?.[0]?.(
+    { prompt: "another question", systemPrompt: "base" },
+    ctx,
+  );
+  assert.equal(selections, 1);
+});
+
+test("TUI startup still offers Scope onboarding immediately", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memory-tui-onboarding-"));
+  const runtime = harness("active", null, join(root, "state"), true);
+  let selections = 0;
+  const ctx = context(runtime.notifications, {
+    cwd: root,
+    mode: "tui",
+    select: async () => {
+      selections++;
+      return "기억 없이 계속";
+    },
+  });
+
+  await runtime.handlers.get("session_start")?.[0]?.({}, ctx);
+
+  assert.equal(selections, 1);
+});
+
+test("RPC startup resolves an already registered Scope without prompting", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memory-rpc-registered-"));
+  const dataDir = join(root, "state");
+  const project = await createProject(dataDir, "Registered");
+  await createScope(dataDir, {
+    root,
+    projectId: project.projectId,
+    name: "registered",
+  });
+  const runtime = harness("active", null, dataDir, true);
+  let selections = 0;
+  const ctx = context(runtime.notifications, {
+    cwd: root,
+    mode: "rpc",
+    select: async () => {
+      selections++;
+      return undefined;
+    },
+  });
+
+  await runtime.handlers.get("session_start")?.[0]?.({}, ctx);
+  await runtime.handlers.get("input")?.[0]?.(
+    { text: "question", source: "rpc" },
+    ctx,
+  );
+  await runtime.handlers.get("before_agent_start")?.[0]?.(
+    { prompt: "question", systemPrompt: "base" },
+    ctx,
+  );
+
+  assert.equal(selections, 0);
+  assert.equal(runtime.calls.recall, 1);
+});
 
 test("shadow mode captures turns but exposes no tool or automatic recall", async () => {
   const runtime = harness("shadow");
