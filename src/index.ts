@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -24,6 +24,7 @@ import {
 } from "./hermes.js";
 import { enqueueProjectMemoryMirror } from "./mirror.js";
 import {
+  findMemoryDisabledProject,
   loadScopeCatalog,
   projectByName,
   qualifiedScopeName,
@@ -31,6 +32,7 @@ import {
   removeProjectIfEmpty,
   type ScopeCatalog,
 } from "./scope/catalog.js";
+import { resolveGitContext } from "./scope/git.js";
 import { onboardScope } from "./scope/onboarding.js";
 import {
   resolveScope,
@@ -216,6 +218,17 @@ export function createMemoryOrchestratorExtension(
     const clock = dependencies.clock ?? Date.now;
     const syncHermesScopeStore =
       dependencies.syncHermesScopeStore ?? ensureHermesScopeStore;
+    const isProjectMemoryDisabled = async (cwd: string): Promise<boolean> => {
+      const git = resolveGitContext(cwd);
+      const root = resolve(git?.mainRoot ?? cwd);
+      return Boolean(
+        await findMemoryDisabledProject(
+          config.dataDir,
+          root,
+          git?.repositoryId,
+        ),
+      );
+    };
 
     let currentScope: ResolvedScope | null = null;
     let scopeCwd = "";
@@ -516,7 +529,9 @@ export function createMemoryOrchestratorExtension(
       const scope = await ensureScope(ctx.cwd, ctx);
       scheduleDrain(ctx);
       if (!scope) {
-        ctx.ui.notify(unavailableScopeMessage, "warning");
+        if (!(await isProjectMemoryDisabled(ctx.cwd))) {
+          ctx.ui.notify(unavailableScopeMessage, "warning");
+        }
         return;
       }
       void provider.ensureKnowledgeViews(scope).catch((error: unknown) => {

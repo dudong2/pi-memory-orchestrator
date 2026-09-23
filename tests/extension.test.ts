@@ -7,7 +7,11 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { DEFAULT_CONFIG } from "../src/config.js";
 import { createMemoryOrchestratorExtension } from "../src/index.js";
 import type { ScopedHindsightProvider } from "../src/hindsight/provider.js";
-import { createProject, createScope } from "../src/scope/catalog.js";
+import {
+  createProject,
+  createScope,
+  disableProjectMemory,
+} from "../src/scope/catalog.js";
 import type { ResolvedScope } from "../src/scope/resolver.js";
 import { scope } from "./fixtures.js";
 
@@ -169,6 +173,34 @@ test("TUI startup still offers Scope onboarding immediately", async () => {
   await runtime.handlers.get("session_start")?.[0]?.({}, ctx);
 
   assert.equal(selections, 1);
+});
+
+test("a memory-disabled Project starts without an unresolved-Scope warning", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memory-disabled-startup-"));
+  const dataDir = join(root, "state");
+  await disableProjectMemory(dataDir, { root, name: "scratchpad" });
+  const runtime = harness("active", null, dataDir, true);
+  let selections = 0;
+  const ctx = context(runtime.notifications, {
+    cwd: root,
+    mode: "tui",
+    select: async () => {
+      selections++;
+      return undefined;
+    },
+  });
+
+  await runtime.handlers.get("session_start")?.[0]?.({}, ctx);
+
+  assert.equal(selections, 0);
+  assert.equal(
+    runtime.notifications.some(
+      ({ message, level }) =>
+        level === "warning" &&
+        message.includes("memory scope could not be resolved"),
+    ),
+    false,
+  );
 });
 
 test("RPC startup resolves an already registered Scope without prompting", async () => {
