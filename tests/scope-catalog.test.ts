@@ -59,62 +59,76 @@ test("a registered scope resolves through its explicit project", async () => {
   assert.equal(scope?.scopeTag, registered.memoryTag);
 });
 
-test("only one global Scope can be registered", async () => {
-  const root = await tempRoot("memory-catalog-global-unique-");
+test("global Scope creation is rejected", async () => {
+  const root = await tempRoot("memory-catalog-no-global-");
   const dataDir = join(root, "state");
-  const firstRoot = join(root, "first");
-  const secondRoot = join(root, "second");
-  await mkdir(firstRoot);
-  await mkdir(secondRoot);
-  const registered = await createScope(dataDir, {
-    root: firstRoot,
-    name: "global",
-    kind: "global",
-  });
+  const project = await createProject(dataDir, "Project");
 
   await assert.rejects(
     createScope(dataDir, {
-      root: secondRoot,
+      root,
+      projectId: project.projectId,
       name: "global",
-      kind: "global",
+      kind: "global" as never,
     }),
-    /global Scope is already registered/,
+    /kind must be directory or repository/,
   );
-
-  const catalog = await loadScopeCatalog(dataDir);
-  assert.deepEqual(
-    Object.values(catalog.scopes).map((scope) => scope.scopeId),
-    [registered.scopeId],
-  );
-  await assert.rejects(access(join(secondRoot, ".pi-memory-scope.json")));
+  await assert.rejects(access(join(root, ".pi-memory-scope.json")));
 });
 
-test("moving the global Scope preserves its identity and global memory tag", async () => {
-  const parent = await tempRoot("memory-catalog-global-move-");
-  const first = join(parent, "first");
-  const second = join(parent, "second");
+test("a version 2 global Scope migrates to a memory-disabled Project", async () => {
+  const parent = await tempRoot("memory-catalog-global-migration-");
+  const scratchpad = join(parent, "scratchpad");
   const dataDir = join(parent, "state");
-  await mkdir(first);
-  const registered = await createScope(dataDir, {
-    root: first,
-    name: "global",
+  const markerPath = join(scratchpad, ".pi-memory-scope.json");
+  await mkdir(scratchpad);
+  await mkdir(dataDir);
+  const timestamp = "2026-09-14T00:00:00.000Z";
+  const marker = {
+    version: 2,
+    scopeId: "scope_global",
+    scopeName: "global",
     kind: "global",
-  });
-  await rename(first, second);
-
-  const scope = await resolveScope(second, { dataDir, startCwd: second });
-
-  assert.equal(scope?.scopeId, registered.scopeId);
-  assert.equal(scope?.kind, "global");
-  assert.equal(scope?.scopeTag, "scope:global");
-  const catalog = await loadScopeCatalog(dataDir);
-  assert.equal(
-    catalog.scopes[registered.scopeId]?.markerPath,
-    join(second, ".pi-memory-scope.json"),
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+  await writeFile(markerPath, `${JSON.stringify(marker)}\n`);
+  await writeFile(
+    join(dataDir, "scope-catalog.json"),
+    `${JSON.stringify({
+      version: 2,
+      projects: {},
+      scopes: {
+        scope_global: {
+          scopeId: "scope_global",
+          name: "global",
+          aliases: [],
+          kind: "global",
+          memoryTag: "scope:global",
+          markerPath,
+          paths: [scratchpad],
+          portableMarkerRoot: scratchpad,
+          portablePaths: [scratchpad],
+          marker,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        },
+      },
+    })}\n`,
   );
+
+  const catalog = await loadScopeCatalog(dataDir);
+
+  assert.equal(catalog.version, 3);
+  assert.deepEqual(catalog.scopes, {});
+  assert.deepEqual(
+    Object.values(catalog.memoryDisabledProjects).map((record) => record.name),
+    ["scratchpad"],
+  );
+  await assert.rejects(access(markerPath));
   assert.equal(
-    catalog.scopes[registered.scopeId]?.paths.includes(await realpath(second)),
-    true,
+    await resolveScope(scratchpad, { dataDir, startCwd: scratchpad }),
+    null,
   );
 });
 
@@ -416,5 +430,5 @@ test("project lookup is case-insensitive and aliases are explicit", async () => 
   const stored = JSON.parse(
     await readFile(join(root, "scope-catalog.json"), "utf8"),
   );
-  assert.equal(stored.version, 2);
+  assert.equal(stored.version, 3);
 });

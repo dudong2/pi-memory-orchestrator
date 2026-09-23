@@ -17,7 +17,6 @@ flowchart TB
     Hermes --> HermesGlobal[Global MEMORY / USER / failures]
     Hermes --> HermesScope[Current Scope MEMORY.md]
 
-    Hindsight --> HindsightGlobal[scope:global]
     Hindsight --> HindsightCurrent[Current Scope memoryTag]
     Hindsight -. explicit lookup .-> OtherScopes[Other Project / Scope tags]
 
@@ -46,8 +45,6 @@ A Scope belongs to at most one Project and owns:
 - one Hermes working-memory directory;
 - one local `.pi-memory-scope.json` marker.
 
-The special global Scope belongs to no Project.
-
 Current catalog shape:
 
 | Project | Member Scopes |
@@ -72,18 +69,17 @@ flowchart TD
     Resolve -->|Repository identity changed| Rebind{Confirm existing Scope rebind?}
     Rebind -->|Yes| Bind
     Rebind -->|No| Disabled[Disable Scope memory for this session]
+    Resolve -->|Memory-disabled Project| Disabled[Keep Scope memory disabled]
     Resolve -->|No marker or catalog match| Choose{User choice}
-    Choose --> Global[Choose global if no global Scope is registered]
     Choose --> Existing[Choose existing Project]
     Choose --> New[Create new Project]
-    Choose --> None[Continue without memory]
-    Global --> GlobalScope[Register this location as the global Scope]
+    Choose --> None[Do not register this Project]
     Existing --> Scope[Create Scope with folder name]
     New --> First[Create Project and folder-named Scope]
-    GlobalScope --> Bind
     Scope --> Bind
     First --> Bind
-    None --> Disabled
+    None --> Persist[Persist memory-disabled Project identity]
+    Persist --> Disabled
 ```
 
 Resolution rules:
@@ -96,11 +92,11 @@ Resolution rules:
 - When a marker still identifies a registered Scope but its canonical remote changed, startup asks for explicit confirmation before rebinding that existing Scope. Declining never falls through to new-Scope onboarding.
 - Existing canonical remote identities are never rewritten without that confirmation.
 - An unregistered location never creates a Scope automatically.
-- Exactly one `kind: "global"` Scope may be registered. When none exists, onboarding offers `global` in the Project selection; once registered, the option is hidden and catalog writes reject another global Scope.
-- The global Scope can move with its marker-bearing directory. Resolution preserves its `scopeId` and `scope:global` memory tag while refreshing catalog paths.
+- Global Scopes are not supported. Every registered Scope belongs to a Project.
+- A Project can be persistently marked as memory-disabled without creating a Scope or marker. Git repository identity is used when available; otherwise its exact directory identity is used.
 - A new Scope automatically uses the repository-root or registration-directory basename. The user is asked for a different name only when that Project already contains the same Scope name.
 
-Choosing **continue without memory** creates no marker and no catalog suppression record. Hindsight Scope memory and Hermes Scope memory are disabled only for that session. A new session asks again.
+Choosing **do not use memory for this Project** creates no Scope marker or memory store. It records only the Project identity in the control-plane catalog, so Hindsight and Hermes Scope memory remain disabled in later sessions without prompting again.
 
 ## Stable identity and moves
 
@@ -123,7 +119,7 @@ Moving or renaming a marker-bearing directory preserves `scopeId`, Project membe
 Default recall is always:
 
 ```text
-global OR current Scope
+current Scope only
 ```
 
 No parent, sibling, or entire Project is included implicitly.
@@ -142,7 +138,7 @@ scope:stablelabs/stable
 
 ```mermaid
 flowchart LR
-    Query[User query] --> Default[global + current Scope]
+    Query[User query] --> Default[current Scope]
     Query --> Selector{Explicit or unambiguous name?}
     Selector -->|Project| Members[All Project member Scopes]
     Selector -->|Scope| One[One named Scope]
@@ -176,7 +172,7 @@ flowchart LR
 
 Hermes is persistent but deliberately small. In `legacy-inject` mode, a frozen snapshot is loaded at session start and injected on every model request.
 
-Global stores:
+Shared Hermes stores (these are user/agent working-memory files, not a global Scope):
 
 ```text
 ~/.pi/agent/pi-hermes-memory/MEMORY.md
@@ -242,7 +238,6 @@ The Hindsight Knowledge tree mirrors the logical model:
 
 ```text
 Coding Projects
-├── Global knowledge
 ├── character-ai-chat
 │   └── ai-chat-engine
 └── stablelabs

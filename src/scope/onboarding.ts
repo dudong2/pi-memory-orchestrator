@@ -5,6 +5,8 @@ import { resolveGitContext } from "./git.js";
 import {
   createProject,
   createScope,
+  disableProjectMemory,
+  findMemoryDisabledProject,
   loadScopeCatalog,
   readScopeMarker,
   rebindScopeRepositoryId,
@@ -15,14 +17,12 @@ import {
 } from "./catalog.js";
 import { resolveScope, type ResolvedScope } from "./resolver.js";
 
-const GLOBAL_SCOPE = "global";
-const GLOBAL_SCOPE_DISAMBIGUATED = "global (전역 Scope)";
 const CREATE_PROJECT = "새 Project 만들기";
-const WITHOUT_MEMORY = "기억 없이 계속";
+const WITHOUT_MEMORY = "이 Project에서 메모리 사용 안 함";
 
 type ProjectChoice =
-  | { kind: "global" }
   | { kind: "project"; project: ProjectRecord }
+  | { kind: "memory-disabled" }
   | null;
 
 function suggestedName(root: string): string {
@@ -160,22 +160,13 @@ async function chooseProject(
   const projects = Object.values(catalog.projects).sort((a, b) =>
     a.name.localeCompare(b.name),
   );
-  const hasGlobalScope = Object.values(catalog.scopes).some(
-    (scope) => scope.kind === "global",
-  );
-  const globalOption = projects.some(
-    (project) => project.name.toLocaleLowerCase() === GLOBAL_SCOPE,
-  )
-    ? GLOBAL_SCOPE_DISAMBIGUATED
-    : GLOBAL_SCOPE;
   const choice = await ctx.ui.select("이 위치의 메모리 Project를 선택하세요", [
-    ...(!hasGlobalScope ? [globalOption] : []),
     ...projects.map((project) => project.name),
     CREATE_PROJECT,
     WITHOUT_MEMORY,
   ]);
-  if (!choice || choice === WITHOUT_MEMORY) return null;
-  if (!hasGlobalScope && choice === globalOption) return { kind: "global" };
+  if (!choice) return null;
+  if (choice === WITHOUT_MEMORY) return { kind: "memory-disabled" };
   if (choice !== CREATE_PROJECT) {
     const selected = projects.find((project) => project.name === choice);
     if (selected) return { kind: "project", project: selected };
@@ -205,32 +196,34 @@ export async function onboardScope(
 
   const git = resolveGitContext(ctx.cwd);
   const root = resolve(git?.mainRoot ?? ctx.cwd);
-  const recovery = await recoverRenamedRepository(ctx, config, root);
-  if (recovery.handled) return recovery.scope;
-
-  const choice = await chooseProject(ctx, config, root);
-  if (!choice) {
+  const memoryDisabled = await findMemoryDisabledProject(
+    config.dataDir,
+    root,
+    git?.repositoryId,
+  );
+  if (memoryDisabled) {
     ctx.ui.notify(
-      "이 위치에서는 Hindsight와 Hermes Scope 메모리를 사용하지 않습니다.",
+      `Project '${memoryDisabled.name}'는 메모리에 등록하지 않도록 설정되어 있습니다.`,
       "info",
     );
     return null;
   }
 
-  if (choice.kind === "global") {
-    await createScope(config.dataDir, {
+  const recovery = await recoverRenamedRepository(ctx, config, root);
+  if (recovery.handled) return recovery.scope;
+
+  const choice = await chooseProject(ctx, config, root);
+  if (!choice) return null;
+  if (choice.kind === "memory-disabled") {
+    const disabled = await disableProjectMemory(config.dataDir, {
       root,
-      name: GLOBAL_SCOPE,
-      kind: "global",
-      markerName: config.markerName,
+      name: suggestedName(root),
+      ...(git?.repositoryId ? { repositoryId: git.repositoryId } : {}),
     });
-    const created = await resolveScope(ctx.cwd, {
-      markerName: config.markerName,
-      dataDir: config.dataDir,
-      startCwd: ctx.cwd,
-    });
-    if (created) return created;
-    ctx.ui.notify("global Scope를 등록했지만 다시 해석하지 못했습니다.", "error");
+    ctx.ui.notify(
+      `Project '${disabled.name}'는 이후 세션에서도 메모리에 등록하지 않습니다.`,
+      "info",
+    );
     return null;
   }
 

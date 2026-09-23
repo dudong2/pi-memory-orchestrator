@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { ensureHermesScopeStore } from "../src/hermes.js";
-import { globalScope, scope } from "./fixtures.js";
+import { scope } from "./fixtures.js";
 
 test("Hermes project memory migrates into the stable Scope directory", async () => {
   const agentRoot = await mkdtemp(join(tmpdir(), "hermes-scope-store-"));
@@ -44,9 +44,4 @@ test("Hermes project memory migrates into the stable Scope directory", async () 
   );
   assert.equal(metadata.scopeId, scope.scopeId);
   assert.equal(metadata.qualifiedName, "product/frontend");
-});
-
-test("the global Scope does not create a Hermes project store", async () => {
-  const agentRoot = await mkdtemp(join(tmpdir(), "hermes-global-store-"));
-  assert.equal(await ensureHermesScopeStore(globalScope(), agentRoot), null);
 });

@@ -8,8 +8,7 @@ import type {
   KnowledgeNode,
   KnowledgePageRequest,
 } from "../src/hindsight/client.js";
-import { GLOBAL_SCOPE_TAG } from "../src/scope/query.js";
-import { globalScope, scope } from "./fixtures.js";
+import { scope } from "./fixtures.js";
 
 class FakeKnowledgeApi implements KnowledgeApi {
   roots: KnowledgeNode[] = [];
@@ -139,22 +138,5 @@ test("reassigning a Scope removes its stale Knowledge location", async () => {
   assert.equal(
     root?.children?.[0]?.children?.[0]?.name,
     `${scope.scopeName} [${scope.scopeId}]`,
-  );
-});
-
-test("a global marker creates one shared knowledge page", async () => {
-  const api = new FakeKnowledgeApi();
-  const global = globalScope();
-  assert.deepEqual(await ensureKnowledgeViews(api, "bank", global), {
-    createdFolders: 1,
-    createdPages: 1,
-  });
-  assert.deepEqual(await ensureKnowledgeViews(api, "bank", global), {
-    createdFolders: 0,
-    createdPages: 0,
-  });
-  assert.deepEqual(
-    api.pages.map((page) => page.tags),
-    [[GLOBAL_SCOPE_TAG]],
   );
 });

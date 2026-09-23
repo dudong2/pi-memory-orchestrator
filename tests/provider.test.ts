@@ -7,10 +7,9 @@ import type {
 } from "../src/hindsight/client.js";
 import type { RetainOutbox } from "../src/hindsight/outbox.js";
 import { ScopedHindsightProvider } from "../src/hindsight/provider.js";
-import { GLOBAL_SCOPE_TAG } from "../src/scope/query.js";
-import { globalScope, scope } from "./fixtures.js";
+import { scope } from "./fixtures.js";
 
-test("provider sends a strict global-plus-current filter by default", async () => {
+test("provider sends a strict current-Scope filter by default", async () => {
   let request: RecallRequest | undefined;
   const client = {
     recall: async (_bank: string, value: RecallRequest) => {
@@ -28,10 +27,7 @@ test("provider sends a strict global-plus-current filter by default", async () =
   assert.equal(outcome.memories.length, 1);
   assert.deepEqual(request?.tag_groups, [
     {
-      or: [
-        { tags: [GLOBAL_SCOPE_TAG], match: "all_strict" },
-        { tags: [scope.scopeTag], match: "all_strict" },
-      ],
+      or: [{ tags: [scope.scopeTag], match: "all_strict" }],
     },
   ]);
 });
@@ -69,33 +65,6 @@ test("provider retains every turn under only the current scope tag", async () =>
   assert.deepEqual(item?.observation_scopes, [[scope.scopeTag]]);
   assert.equal(item?.metadata?.scope_id, scope.scopeId);
   assert.equal(item?.metadata?.project_id, scope.projectId);
-});
-
-test("provider retains turns from a global scope under the global tag", async () => {
-  let item: { tags?: string[]; observation_scopes?: string[][] } | undefined;
-  const outbox = {
-    enqueue: async (job: { item: typeof item }) => {
-      item = job.item;
-    },
-  } as unknown as RetainOutbox;
-  const provider = new ScopedHindsightProvider(
-    DEFAULT_CONFIG,
-    {} as HindsightClient,
-    outbox,
-  );
-  await provider.enqueueTurn(
-    globalScope(),
-    {
-      sessionId: "session",
-      turnId: "turn",
-      harness: "test",
-      timestamp: "2026-09-14T00:00:00.000Z",
-    },
-    "question",
-    "answer",
-  );
-  assert.deepEqual(item?.tags, [GLOBAL_SCOPE_TAG]);
-  assert.deepEqual(item?.observation_scopes, [[GLOBAL_SCOPE_TAG]]);
 });
 
 test("provider recall fails open", async () => {

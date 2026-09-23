@@ -8,7 +8,6 @@ const config = loadConfig();
 const catalog = await loadScopeCatalog(config.dataDir);
 const results: Array<{ scope: string; migrated: boolean }> = [];
 for (const record of Object.values(catalog.scopes)) {
-  if (record.kind === "global") continue;
   const root = dirname(record.markerPath);
   const scope = await resolveScope(root, {
     dataDir: config.dataDir,

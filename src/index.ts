@@ -335,15 +335,8 @@ export function createMemoryOrchestratorExtension(
           ctx.ui.notify(unavailableScopeMessage, "error");
           return;
         }
-        if (
-          previousScope.kind === "global" ||
-          !previousScope.projectId ||
-          !previousScope.projectName
-        ) {
-          ctx.ui.notify(
-            "Global Scope는 Project에 재소속할 수 없습니다.",
-            "error",
-          );
+        if (!previousScope.projectId || !previousScope.projectName) {
+          ctx.ui.notify("현재 Scope의 Project를 확인할 수 없습니다.", "error");
           return;
         }
 

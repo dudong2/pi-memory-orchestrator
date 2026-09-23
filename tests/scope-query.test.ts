@@ -2,14 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildScopeQueryPlan,
-  GLOBAL_SCOPE_TAG,
   hasWorkspaceWideIntent,
 } from "../src/scope/query.js";
-import { globalScope, scope } from "./fixtures.js";
+import { scope } from "./fixtures.js";
 
-test("default plan includes only global and current scope", () => {
+test("default plan includes only the current Scope", () => {
   const plan = buildScopeQueryPlan(scope, "Fix the login screen");
-  assert.deepEqual(plan.tags, [GLOBAL_SCOPE_TAG, scope.scopeTag]);
+  assert.deepEqual(plan.tags, [scope.scopeTag]);
   assert.deepEqual(plan.expandedScopes, []);
 });
 
@@ -38,7 +37,7 @@ test("an explicit qualified scope selector expands only that scope", () => {
 
 test("malformed percent encoding in a selector fails safely", () => {
   const plan = buildScopeQueryPlan(scope, "scope:%E0%A4%A query");
-  assert.deepEqual(plan.tags, [GLOBAL_SCOPE_TAG, scope.scopeTag]);
+  assert.deepEqual(plan.tags, [scope.scopeTag]);
 });
 
 test("an unambiguous natural project mention expands its scopes", () => {
@@ -59,20 +58,12 @@ test("project-wide intent expands current project scopes", () => {
   assert.equal(hasWorkspaceWideIntent("프로젝트 전체 구조를 비교해줘"), true);
   const plan = buildScopeQueryPlan(scope, "Compare the entire project");
   assert.equal(plan.workspaceWide, true);
-  assert.equal(plan.tags.length, 4);
+  assert.equal(plan.tags.length, 3);
 });
 
 test("current mode never expands another scope", () => {
   const plan = buildScopeQueryPlan(scope, "project:product", {
     mode: "current",
   });
-  assert.deepEqual(plan.tags, [GLOBAL_SCOPE_TAG, scope.scopeTag]);
-});
-
-test("a global scope searches only global knowledge", () => {
-  const plan = buildScopeQueryPlan(globalScope(), "general knowledge");
-  assert.deepEqual(plan.tags, [GLOBAL_SCOPE_TAG]);
-  assert.deepEqual(plan.tagGroups, [
-    { or: [{ tags: [GLOBAL_SCOPE_TAG], match: "all_strict" }] },
-  ]);
+  assert.deepEqual(plan.tags, [scope.scopeTag]);
 });

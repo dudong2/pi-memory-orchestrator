@@ -16,7 +16,7 @@ import {
   type ScopeRecord,
 } from "./catalog.js";
 
-export type ScopeKind = "global" | "directory" | "repository";
+export type ScopeKind = "directory" | "repository";
 
 export interface ScopeReference {
   scopeId: string;
@@ -95,9 +95,9 @@ function scopeReference(
   record: ScopeRecord,
   project?: ProjectRecord,
 ): ScopeReference {
-  let qualifiedName = record.name;
-  if (record.kind === "global") qualifiedName = "global";
-  else if (project) qualifiedName = `${project.name}/${record.name}`;
+  const qualifiedName = project
+    ? `${project.name}/${record.name}`
+    : record.name;
   return {
     scopeId: record.scopeId,
     scopeName: record.name,
@@ -128,6 +128,10 @@ export async function resolveScope(
   const workspaceRoot = resolve(git?.mainRoot ?? options.startCwd ?? cwd);
   if (isFilesystemRoot(workspaceRoot))
     throw new ScopeBoundaryError(workspaceRoot);
+
+  // Loading also migrates legacy global Scope registrations before their old
+  // marker can be interpreted as an active memory Scope.
+  await loadScopeCatalog(dataDir);
 
   let markerPath = join(workspaceRoot, markerName);
   if (!(await markerExists(markerPath))) {

@@ -4,7 +4,6 @@ import type {
   KnowledgePageRequest,
 } from "./client.js";
 import type { ResolvedScope } from "../scope/resolver.js";
-import { GLOBAL_SCOPE_TAG } from "../scope/query.js";
 
 export interface KnowledgeApi {
   knowledgeTree(
@@ -119,28 +118,6 @@ export async function ensureKnowledgeViews(
     signal,
   );
   if (root.created) createdFolders++;
-
-  if (scope.kind === "global") {
-    if (
-      await ensurePage(
-        api,
-        bankId,
-        root.children,
-        {
-          name: "Global knowledge",
-          source_query:
-            "Maintain a concise current overview of reusable general knowledge, conventions, decisions, corrections, and durable lessons shared across every coding scope.",
-          parent_id: root.id,
-          tags: [GLOBAL_SCOPE_TAG],
-          max_tokens: 2_048,
-          trigger: pageTrigger(),
-        },
-        signal,
-      )
-    )
-      createdPages++;
-    return { createdFolders, createdPages };
-  }
 
   if (!scope.projectId || !scope.projectName) {
     throw new Error(`scope has no project: ${scope.scopeId}`);

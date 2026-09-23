@@ -1,8 +1,6 @@
 import type { TagFilterGroup, TagFilterLeaf } from "../hindsight/client.js";
 import type { ResolvedScope, ScopeReference } from "./resolver.js";
 
-export const GLOBAL_SCOPE_TAG = "scope:global";
-
 export type ScopeQueryMode =
   | "auto"
   | "current"
@@ -88,9 +86,8 @@ function selectedScopes(
   query: string,
   mode: ScopeQueryMode,
 ): ScopeReference[] {
-  if (scope.kind === "global" || mode === "current") return [];
-  if (mode === "all")
-    return scope.knownScopes.filter((candidate) => candidate.kind !== "global");
+  if (mode === "current") return [];
+  if (mode === "all") return scope.knownScopes;
   if (mode === "project" || mode === "workspace") return scope.projectScopes;
   if (mode === "repositories") {
     const requested = new Set(scope.knownRepositoryIds);
@@ -151,16 +148,6 @@ export function buildScopeQueryPlan(
   query: string,
   options: ScopeQueryOptions = {},
 ): ScopeQueryPlan {
-  if (scope.kind === "global") {
-    return {
-      tags: [GLOBAL_SCOPE_TAG],
-      tagGroups: [{ or: [leaf(GLOBAL_SCOPE_TAG)] }],
-      expandedScopes: [],
-      expandedRepositories: [],
-      workspaceWide: false,
-    };
-  }
-
   let mode = options.mode ?? "auto";
   if (mode === "auto" && hasWorkspaceWideIntent(query)) mode = "project";
   const selected = selectedScopes(scope, query, mode);
@@ -176,7 +163,6 @@ export function buildScopeQueryPlan(
   }
 
   const tags = [
-    GLOBAL_SCOPE_TAG,
     scope.scopeTag,
     ...selected.map((candidate) => candidate.memoryTag),
   ].filter((tag, index, all) => all.indexOf(tag) === index);

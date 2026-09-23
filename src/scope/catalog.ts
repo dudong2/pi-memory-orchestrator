@@ -10,9 +10,17 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
 
-export const SCOPE_CATALOG_VERSION = 2 as const;
+export const SCOPE_CATALOG_VERSION = 3 as const;
 export const SCOPE_MARKER_VERSION = 2 as const;
 export const DEFAULT_CATALOG_NAME = "scope-catalog.json";
 export const DEFAULT_MARKER_NAME = ".pi-memory-scope.json";
@@ -25,7 +33,7 @@ export interface ProjectRecord {
   updatedAt: string;
 }
 
-export type RegisteredScopeKind = "directory" | "repository" | "global";
+export type RegisteredScopeKind = "directory" | "repository";
 
 export interface ScopeMarker {
   version: typeof SCOPE_MARKER_VERSION;
@@ -55,10 +63,38 @@ export interface ScopeRecord {
   updatedAt: string;
 }
 
+export interface MemoryDisabledProjectRecord {
+  memoryDisabledProjectId: string;
+  name: string;
+  paths: string[];
+  portablePaths: string[];
+  repositoryId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ScopeCatalog {
   version: typeof SCOPE_CATALOG_VERSION;
   projects: Record<string, ProjectRecord>;
   scopes: Record<string, ScopeRecord>;
+  memoryDisabledProjects: Record<string, MemoryDisabledProjectRecord>;
+}
+
+interface LegacyScopeRecord extends Omit<ScopeRecord, "kind"> {
+  kind: RegisteredScopeKind | "global";
+}
+
+interface LegacyScopeCatalog {
+  version: 2;
+  projects: Record<string, ProjectRecord>;
+  scopes: Record<string, LegacyScopeRecord>;
+}
+
+export interface DisableProjectMemoryInput {
+  root: string;
+  name?: string;
+  repositoryId?: string;
+  homeDir?: string;
 }
 
 export interface CreateScopeInput {
@@ -174,14 +210,11 @@ export function parseScopeMarker(input: unknown): ScopeMarker {
   if (typeof raw.scopeId !== "string" || !raw.scopeId.trim())
     throw new Error("scopeId is required");
   const kind = raw.kind;
-  if (kind !== "directory" && kind !== "repository" && kind !== "global") {
-    throw new Error("kind must be directory, repository, or global");
+  if (kind !== "directory" && kind !== "repository") {
+    throw new Error("kind must be directory or repository");
   }
-  if (
-    kind !== "global" &&
-    (typeof raw.projectId !== "string" || !raw.projectId.trim())
-  ) {
-    throw new Error("projectId is required for non-global scopes");
+  if (typeof raw.projectId !== "string" || !raw.projectId.trim()) {
+    throw new Error("projectId is required");
   }
   const scopeName = normalizedName(raw.scopeName ?? "", "scopeName");
   if (
@@ -223,20 +256,163 @@ export async function readScopeMarker(
 export async function loadScopeCatalog(dataDir: string): Promise<ScopeCatalog> {
   const path = catalogPath(dataDir);
   try {
-    const parsed = JSON.parse(await readFile(path, "utf8")) as ScopeCatalog;
+    const raw = JSON.parse(await readFile(path, "utf8")) as
+      | ScopeCatalog
+      | LegacyScopeCatalog;
+    if (!raw.projects || !raw.scopes) {
+      throw new Error(`invalid scope catalog: ${path}`);
+    }
+    if (raw.version === 2) {
+      const legacyGlobalScopes = Object.values(raw.scopes).filter(
+        (scope) => scope.kind === "global",
+      );
+      const memoryDisabledProjects = Object.fromEntries(
+        legacyGlobalScopes.map((scope) => {
+          const id = `memory-disabled:${scope.scopeId}`;
+          const root = scope.paths[0] ?? dirname(scope.markerPath);
+          const record: MemoryDisabledProjectRecord = {
+            memoryDisabledProjectId: id,
+            name: basename(root) || scope.name,
+            paths: [...scope.paths],
+            portablePaths: [...scope.portablePaths],
+            ...(scope.repositoryId
+              ? { repositoryId: scope.repositoryId }
+              : {}),
+            createdAt: scope.createdAt,
+            updatedAt: scope.updatedAt,
+          };
+          return [id, record];
+        }),
+      );
+      const catalog: ScopeCatalog = {
+        version: SCOPE_CATALOG_VERSION,
+        projects: raw.projects,
+        scopes: Object.fromEntries(
+          Object.entries(raw.scopes).filter(
+            ([, scope]) => scope.kind !== "global",
+          ),
+        ) as Record<string, ScopeRecord>,
+        memoryDisabledProjects,
+      };
+      await writeJsonAtomic(path, catalog);
+      for (const scope of legacyGlobalScopes) {
+        try {
+          await unlink(scope.markerPath);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        }
+      }
+      return catalog;
+    }
     if (
-      parsed.version !== SCOPE_CATALOG_VERSION ||
-      !parsed.projects ||
-      !parsed.scopes
+      raw.version !== SCOPE_CATALOG_VERSION ||
+      !raw.memoryDisabledProjects
     ) {
       throw new Error(`invalid scope catalog: ${path}`);
     }
-    return parsed;
+    return raw;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return { version: SCOPE_CATALOG_VERSION, projects: {}, scopes: {} };
+      return {
+        version: SCOPE_CATALOG_VERSION,
+        projects: {},
+        scopes: {},
+        memoryDisabledProjects: {},
+      };
     }
     throw error;
+  }
+}
+
+function matchesMemoryDisabledProject(
+  project: MemoryDisabledProjectRecord,
+  root: string,
+  portableRoot: string,
+  repositoryId?: string,
+): boolean {
+  return (
+    (repositoryId !== undefined && project.repositoryId === repositoryId) ||
+    project.paths.includes(root) ||
+    project.portablePaths.includes(portableRoot)
+  );
+}
+
+export async function findMemoryDisabledProject(
+  dataDir: string,
+  root: string,
+  repositoryId?: string,
+  homeDir = homedir(),
+): Promise<MemoryDisabledProjectRecord | null> {
+  const catalog = await loadScopeCatalog(dataDir);
+  const canonicalRoot = await canonicalPath(root);
+  const portableRoot = portableCatalogPath(canonicalRoot, homeDir);
+  return (
+    Object.values(catalog.memoryDisabledProjects).find((project) =>
+      matchesMemoryDisabledProject(
+        project,
+        canonicalRoot,
+        portableRoot,
+        repositoryId,
+      ),
+    ) ?? null
+  );
+}
+
+export async function disableProjectMemory(
+  dataDir: string,
+  input: DisableProjectMemoryInput,
+): Promise<MemoryDisabledProjectRecord> {
+  const path = catalogPath(dataDir);
+  const release = await acquireLock(`${path}.lock`);
+  try {
+    const catalog = await loadScopeCatalog(dataDir);
+    const root = await canonicalPath(input.root);
+    const home = await canonicalPath(input.homeDir ?? homedir());
+    const portableRoot = portableCatalogPath(root, home);
+    const existing = Object.values(catalog.memoryDisabledProjects).find(
+      (project) =>
+        matchesMemoryDisabledProject(
+          project,
+          root,
+          portableRoot,
+          input.repositoryId,
+        ),
+    );
+    const now = new Date().toISOString();
+    if (existing) {
+      const next: MemoryDisabledProjectRecord = {
+        ...existing,
+        paths: [...new Set([...existing.paths, root])].sort((a, b) =>
+          a.localeCompare(b),
+        ),
+        portablePaths: [
+          ...new Set([...existing.portablePaths, portableRoot]),
+        ].sort((a, b) => a.localeCompare(b)),
+        ...(input.repositoryId
+          ? { repositoryId: input.repositoryId }
+          : {}),
+        updatedAt: now,
+      };
+      catalog.memoryDisabledProjects[existing.memoryDisabledProjectId] = next;
+      await writeJsonAtomic(path, catalog);
+      return next;
+    }
+
+    const memoryDisabledProjectId = `memory-disabled_${randomUUID()}`;
+    const record: MemoryDisabledProjectRecord = {
+      memoryDisabledProjectId,
+      name: normalizedName(input.name ?? basename(root), "project name"),
+      paths: [root],
+      portablePaths: [portableRoot],
+      ...(input.repositoryId ? { repositoryId: input.repositoryId } : {}),
+      createdAt: now,
+      updatedAt: now,
+    };
+    catalog.memoryDisabledProjects[memoryDisabledProjectId] = record;
+    await writeJsonAtomic(path, catalog);
+    return record;
+  } finally {
+    await release();
   }
 }
 
@@ -256,7 +432,6 @@ export function qualifiedScopeName(
   catalog: ScopeCatalog,
   scope: ScopeRecord,
 ): string {
-  if (scope.kind === "global") return "global";
   const project = scope.projectId
     ? catalog.projects[scope.projectId]
     : undefined;
@@ -310,28 +485,20 @@ export async function createScope(
     const catalog = await loadScopeCatalog(dataDir);
     const kind =
       input.kind ?? (input.repositoryId ? "repository" : "directory");
-    const projectId = kind === "global" ? undefined : input.projectId;
-    if (kind !== "global" && (!projectId || !catalog.projects[projectId])) {
+    if (kind !== "directory" && kind !== "repository") {
+      throw new Error("kind must be directory or repository");
+    }
+    const projectId = input.projectId;
+    if (!projectId || !catalog.projects[projectId]) {
       throw new Error(`unknown projectId: ${String(projectId)}`);
     }
-    if (
-      kind === "global" &&
-      Object.values(catalog.scopes).some(
-        (scope) =>
-          scope.kind === "global" && scope.scopeId !== input.scopeId,
-      )
-    ) {
-      throw new Error("global Scope is already registered");
-    }
     const name = normalizedName(input.name, "scope name");
-    if (kind !== "global") {
-      const duplicate = Object.values(catalog.scopes).find(
-        (scope) =>
-          scope.projectId === projectId &&
-          nameKey(scope.name) === nameKey(name),
-      );
-      if (duplicate) return duplicate;
-    }
+    const duplicate = Object.values(catalog.scopes).find(
+      (scope) =>
+        scope.projectId === projectId &&
+        nameKey(scope.name) === nameKey(name),
+    );
+    if (duplicate) return duplicate;
     const root = await canonicalPath(input.root);
     const home = await canonicalPath(input.homeDir ?? homedir());
     const markerPath = join(root, input.markerName ?? DEFAULT_MARKER_NAME);
@@ -352,9 +519,7 @@ export async function createScope(
       aliases: normalizedAliases(input.aliases),
       ...(projectId ? { projectId } : {}),
       kind,
-      memoryTag:
-        input.memoryTag ??
-        (kind === "global" ? "scope:global" : `scope:id:${scopeId}`),
+      memoryTag: input.memoryTag ?? `scope:id:${scopeId}`,
       markerPath,
       paths: [root],
       portableMarkerRoot: portableCatalogPath(root, home),
@@ -388,9 +553,6 @@ export async function reassignScopeProject(
     const catalog = await loadScopeCatalog(dataDir);
     const scope = catalog.scopes[scopeId];
     if (!scope) throw new Error(`unknown scopeId: ${scopeId}`);
-    if (scope.kind === "global") {
-      throw new Error("the global Scope cannot belong to a Project");
-    }
     const sourceProjectId = scope.projectId;
     if (!sourceProjectId || !catalog.projects[sourceProjectId]) {
       throw new Error(`Scope '${scope.name}' has no registered source Project`);
@@ -654,7 +816,6 @@ export async function resolveCatalogRecord(
   const project = scope.projectId
     ? catalog.projects[scope.projectId]
     : undefined;
-  if (scope.kind !== "global" && !project)
-    throw new Error(`scope project is missing: ${scope.projectId}`);
+  if (!project) throw new Error(`scope project is missing: ${scope.projectId}`);
   return { catalog, scope, ...(project ? { project } : {}) };
 }

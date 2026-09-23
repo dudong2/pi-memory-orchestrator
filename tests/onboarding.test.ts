@@ -44,50 +44,36 @@ function context(
   } as unknown as ExtensionContext;
 }
 
-test("choosing no memory leaves an unregistered directory untouched", async () => {
+test("choosing no memory permanently excludes the Project without creating a Scope", async () => {
   const root = await mkdtemp(join(tmpdir(), "memory-onboarding-none-"));
   const config = { ...DEFAULT_CONFIG, dataDir: join(root, "state") };
-  const scope = await onboardScope(context(root, ["기억 없이 계속"]), config);
-  assert.equal(scope, null);
-  await assert.rejects(access(join(root, config.markerName)));
-});
-
-test("choosing global registers the sole global Scope when it is missing", async () => {
-  const root = await mkdtemp(join(tmpdir(), "memory-onboarding-global-"));
-  const config = { ...DEFAULT_CONFIG, dataDir: join(root, "state") };
-  const selectOptions: string[][] = [];
-
-  const scope = await onboardScope(
-    context(root, ["global"], [], [], [], [], selectOptions),
+  const firstScope = await onboardScope(
+    context(root, ["이 Project에서 메모리 사용 안 함"]),
     config,
   );
+  assert.equal(firstScope, null);
+  await assert.rejects(access(join(root, config.markerName)));
+  const catalog = await loadScopeCatalog(config.dataDir);
+  assert.equal(Object.values(catalog.memoryDisabledProjects).length, 1);
 
-  assert.equal(scope?.kind, "global");
-  assert.equal(scope?.scopeName, "global");
-  assert.equal(scope?.projectId, undefined);
-  assert.equal(scope?.scopeTag, "scope:global");
-  assert.equal(selectOptions[0]?.includes("global"), true);
-  await access(join(root, config.markerName));
+  const secondSelectOptions: string[][] = [];
+  const secondScope = await onboardScope(
+    context(root, [], [], [], [], [], secondSelectOptions),
+    config,
+  );
+  assert.equal(secondScope, null);
+  assert.deepEqual(secondSelectOptions, []);
 });
 
-test("Project selection omits global when a global Scope is registered", async () => {
-  const root = await mkdtemp(join(tmpdir(), "memory-onboarding-global-exists-"));
-  const globalRoot = join(root, "global");
-  const launch = join(root, "service");
-  await mkdir(globalRoot);
-  await mkdir(launch);
+test("Project selection never offers a global Scope", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memory-onboarding-no-global-"));
   const config = { ...DEFAULT_CONFIG, dataDir: join(root, "state") };
-  await createScope(config.dataDir, {
-    root: globalRoot,
-    name: "global",
-    kind: "global",
-  });
   const selectOptions: string[][] = [];
 
   const scope = await onboardScope(
     context(
-      launch,
-      ["기억 없이 계속"],
+      root,
+      ["이 Project에서 메모리 사용 안 함"],
       [],
       [],
       [],

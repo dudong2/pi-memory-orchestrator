@@ -125,7 +125,7 @@ test("RPC startup defers Scope onboarding until the first user input", async () 
     mode: "rpc",
     select: async () => {
       selections++;
-      return "기억 없이 계속";
+      return "이 Project에서 메모리 사용 안 함";
     },
   });
 
@@ -162,7 +162,7 @@ test("TUI startup still offers Scope onboarding immediately", async () => {
     mode: "tui",
     select: async () => {
       selections++;
-      return "기억 없이 계속";
+      return "이 Project에서 메모리 사용 안 함";
     },
   });
 

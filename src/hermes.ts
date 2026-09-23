@@ -122,7 +122,6 @@ export async function ensureHermesScopeStore(
   scope: ResolvedScope,
   agentRoot = resolveAgentRoot(),
 ): Promise<HermesProjectInfo | null> {
-  if (scope.kind === "global") return null;
   if (!scope.projectId || !scope.projectName) {
     throw new Error(`scope has no project: ${scope.scopeId}`);
   }

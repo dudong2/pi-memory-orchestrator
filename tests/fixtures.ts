@@ -76,39 +76,3 @@ export const scope: ResolvedScope = {
   knownScopes: [backend, frontend, infrastructure],
   projectScopes: [backend, frontend, infrastructure],
 };
-
-export function globalScope(): ResolvedScope {
-  const global: ScopeReference = {
-    scopeId: "scope_global",
-    scopeName: "global",
-    qualifiedName: "global",
-    aliases: [],
-    projectAliases: [],
-    memoryTag: "scope:global",
-    kind: "global",
-  };
-  return {
-    workspaceRoot: "/work/scratchpad",
-    markerPath: "/work/scratchpad/.pi-memory-scope.json",
-    marker: {
-      version: 2,
-      scopeId: global.scopeId,
-      scopeName: global.scopeName,
-      kind: "global",
-      createdAt: "2026-09-14T00:00:00.000Z",
-      updatedAt: "2026-09-14T00:00:00.000Z",
-    },
-    scopeId: global.scopeId,
-    scopeName: global.scopeName,
-    legacyHermesNames: [],
-    workspaceTag: global.memoryTag,
-    git: null,
-    scopeTag: global.memoryTag,
-    kind: "global",
-    ancestors: [],
-    knownRepositoryIds: [],
-    workspaceRepositoryIds: [],
-    knownScopes: [global],
-    projectScopes: [],
-  };
-}

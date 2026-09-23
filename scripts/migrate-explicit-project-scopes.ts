@@ -13,7 +13,11 @@ import { basename, dirname, join, resolve } from "node:path";
 import { loadConfig } from "../src/config.js";
 import { HERMES_SCOPE_STORE_FILE, resolveAgentRoot } from "../src/hermes.js";
 import { parseJson } from "../src/json.js";
-import { createProject, createScope } from "../src/scope/catalog.js";
+import {
+  createProject,
+  createScope,
+  disableProjectMemory,
+} from "../src/scope/catalog.js";
 
 interface MigrationProject {
   projectId: string;
@@ -191,6 +195,14 @@ const projectMap = new Map(
   plan.projects.map((project) => [project.projectId, project]),
 );
 for (const scope of plan.scopes) {
+  if (scope.kind === "global") {
+    await disableProjectMemory(config.dataDir, {
+      root: expand(scope.root),
+      name: basename(expand(scope.root)),
+      ...(scope.repositoryId ? { repositoryId: scope.repositoryId } : {}),
+    });
+    continue;
+  }
   await createScope(config.dataDir, {
     root: expand(scope.root),
     projectId: scope.projectId,
