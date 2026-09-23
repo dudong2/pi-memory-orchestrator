@@ -5,8 +5,9 @@ import { DEFAULT_CONFIG, parseConfig } from "../src/config.js";
 test("parseConfig returns safe shadow defaults", () => {
   const config = parseConfig(undefined);
   assert.equal(config.mode, "shadow");
-  assert.equal(config.bankId, "coding-agent::dudong2");
-  assert.equal(config.shadowBankId, "coding-agent::dudong2::shadow");
+  assert.equal(config.bankId, "pi");
+  assert.equal(config.shadowBankId, "pi::shadow");
+  assert.equal(config.apiUrl, "http://127.0.0.1:8888");
   assert.equal(config.requestTimeoutMs, 30_000);
   assert.equal(config.markerName, ".pi-memory-scope.json");
 });

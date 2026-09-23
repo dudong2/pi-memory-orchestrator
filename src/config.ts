@@ -39,10 +39,10 @@ function detectHarness(): "pi" | "omp" {
 export const DEFAULT_CONFIG: OrchestratorConfig = {
   mode: "shadow",
   harness: detectHarness(),
-  apiUrl: "http://127.0.0.1:18910",
+  apiUrl: "http://127.0.0.1:8888",
   hindsightConfigPath: join(homedir(), ".hindsight", "coding-agent.json"),
-  bankId: "coding-agent::dudong2",
-  shadowBankId: "coding-agent::dudong2::shadow",
+  bankId: "pi",
+  shadowBankId: "pi::shadow",
   requestTimeoutMs: 30_000,
   targetTimeoutMs: 5_000,
   maxRecallTokens: 4_096,

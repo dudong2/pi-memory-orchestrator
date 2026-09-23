@@ -32,7 +32,7 @@ flowchart TB
 | Scope | The only ordinary memory owner | One folder in the cabinet |
 | Orchestrator | Resolves identity and routes reads/writes | The records clerk |
 
-The active Hindsight bank is `coding-agent::dudong2`. Pi and OMP share the same catalog, bank, Hermes Markdown, SQLite mirror, and durable outbox.
+The active Hindsight bank is `pi`. Pi uses the same catalog, bank, Hermes Markdown, SQLite mirror, and durable outbox.
 
 ## Project and Scope
 
@@ -260,7 +260,7 @@ Each Scope page uses a strict tag filter. There is no filesystem-parent knowledg
 | Hermes global working memory | `~/.pi/agent/pi-hermes-memory/` |
 | Hermes Scope working memory | `~/.pi/agent/projects-memory/<scopeId>/` |
 | Hermes search/session mirror | `~/.pi/agent/pi-hermes-memory/sessions.db` |
-| Hindsight long-term data | local PostgreSQL, bank `coding-agent::dudong2` |
+| Hindsight long-term data | local PostgreSQL, bank `pi` |
 
 ## Commands and tools
 
@@ -289,9 +289,9 @@ Default file: `~/.config/pi-memory-orchestrator/config.json`.
 ```json
 {
   "mode": "active",
-  "bankId": "coding-agent::dudong2",
-  "shadowBankId": "coding-agent::dudong2::shadow",
-  "apiUrl": "http://127.0.0.1:18910",
+  "bankId": "pi",
+  "shadowBankId": "pi::shadow",
+  "apiUrl": "http://127.0.0.1:8888",
   "requestTimeoutMs": 30000,
   "targetTimeoutMs": 5000,
   "maxRecallTokens": 4096,
