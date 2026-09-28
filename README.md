@@ -208,7 +208,7 @@ OpenRouter receives only recall queries and reranking candidates. The authoritat
 ## Durable outbox and failure behavior
 
 ```text
-~/.local/share/pi-memory-orchestrator/outbox/
+~/.config/pi-memory-orchestrator/outbox/
 ├── pending/
 ├── processing/
 └── failed/
@@ -254,9 +254,9 @@ Each Scope page uses a strict tag filter. There is no filesystem-parent knowledg
 
 | Data | Location |
 | --- | --- |
-| Project/Scope catalog | `~/.local/share/pi-memory-orchestrator/scope-catalog.json` |
+| Project/Scope catalog | `~/.config/pi-memory-orchestrator/scope-catalog.json` |
 | Scope marker | `<registered-root>/.pi-memory-scope.json` |
-| Hindsight retain queue | `~/.local/share/pi-memory-orchestrator/outbox/` |
+| Hindsight retain queue | `~/.config/pi-memory-orchestrator/outbox/` |
 | Hermes global working memory | `~/.pi/agent/pi-hermes-memory/` |
 | Hermes Scope working memory | `~/.pi/agent/projects-memory/<scopeId>/` |
 | Hermes search/session mirror | `~/.pi/agent/pi-hermes-memory/sessions.db` |
@@ -297,12 +297,13 @@ Default file: `~/.config/pi-memory-orchestrator/config.json`.
   "maxRecallTokens": 4096,
   "recallTypes": ["observation"],
   "preferObservations": false,
-  "dataDir": "~/.local/share/pi-memory-orchestrator",
   "markerName": ".pi-memory-scope.json"
 }
 ```
 
-The Hindsight API token is reused from `~/.hindsight/coding-agent.json`; do not duplicate it here.
+The Hindsight API token is reused from `~/.hindsight/coding-agent.json`; do not duplicate it here. The default `dataDir` is `~/.config/pi-memory-orchestrator/`; if specifying it explicitly, use an absolute path (`~` is not expanded in JSON).
+
+For existing installations, move the **entire** `~/.local/share/pi-memory-orchestrator/` contents (catalog, outbox, backups) into `~/.config/pi-memory-orchestrator/`, preserving the existing `config.json`, and update any explicit `dataDir` in that config. Until this is done, installations without an explicit `dataDir` continue to read an unmigrated legacy catalog rather than silently starting with empty state. Restart Pi and OMP after migrating; keep the old path as a temporary symlink during the transition if either runtime is still running.
 
 ## Verification
 
@@ -314,7 +315,7 @@ npm test
 Migration and rollback evidence lives under:
 
 ```text
-~/.local/share/pi-memory-orchestrator/backups/
+~/.config/pi-memory-orchestrator/backups/
 ```
 
 See `docs/explicit-project-scope-migration-20260916.md` for the live cutover record.

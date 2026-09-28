@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -48,7 +48,7 @@ export const DEFAULT_CONFIG: OrchestratorConfig = {
   maxRecallTokens: 4_096,
   recallTypes: ["observation"],
   preferObservations: false,
-  dataDir: join(homedir(), ".local", "share", "pi-memory-orchestrator"),
+  dataDir: join(homedir(), ".config", "pi-memory-orchestrator"),
   markerName: ".pi-memory-scope.json",
 };
 
@@ -119,6 +119,25 @@ export function parseConfig(input: unknown): OrchestratorConfig {
   };
 }
 
+const LEGACY_DATA_DIR = join(
+  homedir(),
+  ".local",
+  "share",
+  "pi-memory-orchestrator",
+);
+
+function preserveUnmigratedCatalog(
+  config: OrchestratorConfig,
+): OrchestratorConfig {
+  if (
+    !existsSync(join(config.dataDir, "scope-catalog.json")) &&
+    existsSync(join(LEGACY_DATA_DIR, "scope-catalog.json"))
+  ) {
+    return { ...config, dataDir: LEGACY_DATA_DIR };
+  }
+  return config;
+}
+
 export function loadConfig(
   path = process.env.PI_MEMORY_ORCHESTRATOR_CONFIG || DEFAULT_CONFIG_PATH,
 ): OrchestratorConfig {
@@ -126,11 +145,18 @@ export function loadConfig(
     const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
     const config = parseConfig(parsed);
     const harness = detectHarness();
-    return harness === "omp" ? { ...config, harness } : config;
+    const resolved =
+      parsed && typeof parsed === "object" && "dataDir" in parsed
+        ? config
+        : preserveUnmigratedCatalog(config);
+    return harness === "omp" ? { ...resolved, harness } : resolved;
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === "ENOENT")
-      return { ...DEFAULT_CONFIG, harness: detectHarness() };
+      return preserveUnmigratedCatalog({
+        ...DEFAULT_CONFIG,
+        harness: detectHarness(),
+      });
     throw error;
   }
 }
