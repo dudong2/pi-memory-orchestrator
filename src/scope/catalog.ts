@@ -12,7 +12,6 @@ import {
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
-const SCOPE_CATALOG_VERSION = 4 as const;
 const SCOPE_MARKER_VERSION = 2 as const;
 const DEFAULT_CATALOG_NAME = "scope-catalog.json";
 export const DEFAULT_MARKER_NAME = ".pi-memory-scope.json";
@@ -56,23 +55,8 @@ export interface ScopeRecord {
 }
 
 export interface ScopeCatalog {
-  version: typeof SCOPE_CATALOG_VERSION;
   projects: Record<string, ProjectRecord>;
   scopes: Record<string, ScopeRecord>;
-}
-
-interface LegacyScopeRecord extends Omit<ScopeRecord, "kind"> {
-  kind: RegisteredScopeKind | "global";
-}
-
-interface LegacyScopeCatalog {
-  version: 2;
-  projects: Record<string, ProjectRecord>;
-  scopes: Record<string, LegacyScopeRecord>;
-}
-
-interface Version3ScopeCatalog extends Omit<ScopeCatalog, "version"> {
-  version: 3;
 }
 
 export interface CreateScopeInput {
@@ -230,59 +214,21 @@ export async function readScopeMarker(
   }
 }
 
+function isRecordMap(value: unknown): boolean {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
 export async function loadScopeCatalog(dataDir: string): Promise<ScopeCatalog> {
   const path = catalogPath(dataDir);
   try {
-    const raw = JSON.parse(await readFile(path, "utf8")) as
-      | ScopeCatalog
-      | Version3ScopeCatalog
-      | LegacyScopeCatalog;
-    if (!raw.projects || !raw.scopes) {
+    const raw = JSON.parse(await readFile(path, "utf8")) as ScopeCatalog | null;
+    if (!raw || !isRecordMap(raw.projects) || !isRecordMap(raw.scopes)) {
       throw new Error(`invalid scope catalog: ${path}`);
     }
-    if (raw.version === 2) {
-      const legacyGlobalScopes = Object.values(raw.scopes).filter(
-        (scope) => scope.kind === "global",
-      );
-      const catalog: ScopeCatalog = {
-        version: SCOPE_CATALOG_VERSION,
-        projects: raw.projects,
-        scopes: Object.fromEntries(
-          Object.entries(raw.scopes).filter(
-            ([, scope]) => scope.kind !== "global",
-          ),
-        ) as Record<string, ScopeRecord>,
-      };
-      await writeJsonAtomic(path, catalog);
-      for (const scope of legacyGlobalScopes) {
-        try {
-          await unlink(scope.markerPath);
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-        }
-      }
-      return catalog;
-    }
-    if (raw.version === 3) {
-      const catalog: ScopeCatalog = {
-        version: SCOPE_CATALOG_VERSION,
-        projects: raw.projects,
-        scopes: raw.scopes,
-      };
-      await writeJsonAtomic(path, catalog);
-      return catalog;
-    }
-    if (raw.version !== SCOPE_CATALOG_VERSION) {
-      throw new Error(`invalid scope catalog: ${path}`);
-    }
-    return raw;
+    return { projects: raw.projects, scopes: raw.scopes };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return {
-        version: SCOPE_CATALOG_VERSION,
-        projects: {},
-        scopes: {},
-      };
+      return { projects: {}, scopes: {} };
     }
     throw error;
   }

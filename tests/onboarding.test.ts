@@ -12,7 +12,7 @@ import {
   loadScopeCatalog,
 } from "../src/scope/catalog.js";
 import { onboardScope } from "../src/scope/onboarding.js";
-import { writeVersion3Catalog } from "./fixtures.js";
+import { writeCatalogFixture } from "./fixtures.js";
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8" }).trim();
@@ -78,12 +78,15 @@ test("Project selection offers neither a global Scope nor persistent memory excl
   assert.deepEqual(selectOptions[0], ["새 Project 만들기"]);
 });
 
-test("legacy memory exclusion does not prevent explicit Scope registration", async () => {
-  const root = await mkdtemp(join(tmpdir(), "memory-onboarding-legacy-"));
+test("an unversioned Catalog supports explicit Scope registration", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memory-onboarding-current-"));
   const config = { ...DEFAULT_CONFIG, dataDir: join(root, "state") };
   const project = await createProject(config.dataDir, "Product");
   const catalog = await loadScopeCatalog(config.dataDir);
-  await writeVersion3Catalog(config.dataDir, root, catalog);
+  await writeCatalogFixture(config.dataDir, {
+    projects: catalog.projects,
+    scopes: catalog.scopes,
+  });
 
   const scope = await onboardScope(context(root, ["Product"]), config);
 

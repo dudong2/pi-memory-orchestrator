@@ -5,7 +5,6 @@ import { DEFAULT_CONFIG } from "../config.js";
 import { resolveGitContext, type GitContext } from "./git.js";
 import {
   DEFAULT_MARKER_NAME,
-  loadScopeCatalog,
   promoteScopeRepositoryId,
   readScopeMarker,
   resolveCatalogRecord,
@@ -213,10 +212,6 @@ export async function resolveScope(
   const workspaceRoot = resolve(git?.mainRoot ?? options.startCwd ?? cwd);
   if (isFilesystemRoot(workspaceRoot))
     throw new ScopeBoundaryError(workspaceRoot);
-
-  // Loading also migrates legacy global Scope registrations before their old
-  // marker can be interpreted as an active memory Scope.
-  await loadScopeCatalog(dataDir);
 
   let markerPath = join(workspaceRoot, markerName);
   if (!(await markerExists(markerPath))) {

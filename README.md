@@ -95,7 +95,9 @@ Resolution rules:
 
 메모리를 사용하지 않는 위치에서는 `pi-hermes-memory`와 `pi-memory-orchestrator`를 로드하지 않습니다. Project별 영구 메모리 비활성화 선택지나 제외 목록은 제공하지 않습니다.
 
-등록 화면을 취소하면 새 Scope나 marker 없이 현재 세션을 계속하며, 다음 세션에서는 다시 등록을 안내합니다. 기존 Catalog v3는 읽을 때 v4로 전환되어 비활성화 기록만 제거되고, 등록된 Project·Scope·ID·메모리 태그와 기존 기억은 유지됩니다.
+등록 화면을 취소하면 새 Scope나 marker 없이 현재 세션을 계속하며, 다음 세션에서는 다시 등록을 안내합니다.
+
+Catalog는 `projects`와 `scopes`만 담는 단일 현행 형식을 사용하며, 스키마 버전 번호나 구버전 호환·자동 마이그레이션 분기를 유지하지 않습니다. 형식을 변경할 때는 현재 코드와 로컬 데이터를 함께 정리하고, 기존 Project·Scope·ID·메모리 태그와 기억 연결을 보존합니다.
 
 ## Stable identity and moves
 

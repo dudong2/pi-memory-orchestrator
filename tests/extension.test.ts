@@ -9,7 +9,7 @@ import { createMemoryOrchestratorExtension } from "../src/index.js";
 import type { ScopedHindsightProvider } from "../src/hindsight/provider.js";
 import { createProject, createScope } from "../src/scope/catalog.js";
 import type { ResolvedScope } from "../src/scope/resolver.js";
-import { scope, writeVersion3Catalog } from "./fixtures.js";
+import { scope, writeCatalogFixture } from "./fixtures.js";
 
 function harness(
   mode: "shadow" | "active",
@@ -171,10 +171,10 @@ test("TUI startup still offers Scope onboarding immediately", async () => {
   assert.equal(selections, 1);
 });
 
-test("legacy memory exclusion no longer skips startup onboarding or its warning", async () => {
-  const root = await mkdtemp(join(tmpdir(), "memory-legacy-startup-"));
+test("an unversioned Catalog offers startup onboarding and warns after cancellation", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memory-current-startup-"));
   const dataDir = join(root, "state");
-  await writeVersion3Catalog(dataDir, root);
+  await writeCatalogFixture(dataDir);
   const runtime = harness("active", null, dataDir, true);
   let selections = 0;
   const ctx = context(runtime.notifications, {
