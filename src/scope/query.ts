@@ -1,7 +1,7 @@
 import type { TagFilterGroup, TagFilterLeaf } from "../hindsight/client.js";
 import type { ResolvedScope, ScopeReference } from "./resolver.js";
 
-export type ScopeQueryMode =
+type ScopeQueryMode =
   | "auto"
   | "current"
   | "project"
@@ -81,6 +81,51 @@ function scopeKeys(scope: ScopeReference): string[] {
   return [scope.scopeName, scope.qualifiedName, ...scope.aliases].map(key);
 }
 
+function selectExplicitScopes(
+  knownScopes: ScopeReference[],
+  explicit: ReturnType<typeof explicitSelectors>,
+): ScopeReference[] {
+  const selected = new Map<string, ScopeReference>();
+  for (const projectName of explicit.projects) {
+    const wanted = key(projectName);
+    for (const candidate of knownScopes) {
+      if (projectKeys(candidate).includes(wanted))
+        selected.set(candidate.scopeId, candidate);
+    }
+  }
+  for (const scopeName of explicit.scopes) {
+    const wanted = key(scopeName);
+    for (const candidate of knownScopes) {
+      if (scopeKeys(candidate).includes(wanted))
+        selected.set(candidate.scopeId, candidate);
+    }
+  }
+  return [...selected.values()];
+}
+
+function selectMentionedScopes(
+  knownScopes: ScopeReference[],
+  query: string,
+): ScopeReference[] {
+  const matchedProjects = new Set<string>();
+  for (const candidate of knownScopes) {
+    if (!candidate.projectId) continue;
+    const names = [candidate.projectName ?? "", ...candidate.projectAliases];
+    if (names.some((name) => mentions(query, name)))
+      matchedProjects.add(candidate.projectId);
+  }
+  if (matchedProjects.size === 1) {
+    const [projectId] = matchedProjects;
+    return knownScopes.filter((candidate) => candidate.projectId === projectId);
+  }
+  const matchedScopes = knownScopes.filter((candidate) =>
+    [candidate.qualifiedName, ...candidate.aliases].some((name) =>
+      mentions(query, name),
+    ),
+  );
+  return matchedScopes.length === 1 ? matchedScopes : [];
+}
+
 function selectedScopes(
   scope: ResolvedScope,
   query: string,
@@ -97,51 +142,15 @@ function selectedScopes(
   }
 
   const explicit = explicitSelectors(query);
-  const selected = new Map<string, ScopeReference>();
-  for (const projectName of explicit.projects) {
-    const wanted = key(projectName);
-    for (const candidate of scope.knownScopes) {
-      if (projectKeys(candidate).includes(wanted))
-        selected.set(candidate.scopeId, candidate);
-    }
-  }
-  for (const scopeName of explicit.scopes) {
-    const wanted = key(scopeName);
-    for (const candidate of scope.knownScopes) {
-      if (scopeKeys(candidate).includes(wanted))
-        selected.set(candidate.scopeId, candidate);
-    }
-  }
   if (explicit.projects.length || explicit.scopes.length)
-    return [...selected.values()];
-
-  const matchedProjects = new Set<string>();
-  for (const candidate of scope.knownScopes) {
-    if (!candidate.projectId) continue;
-    const names = [candidate.projectName ?? "", ...candidate.projectAliases];
-    if (names.some((name) => mentions(query, name)))
-      matchedProjects.add(candidate.projectId);
-  }
-  if (matchedProjects.size === 1) {
-    const [projectId] = matchedProjects;
-    return scope.knownScopes.filter(
-      (candidate) => candidate.projectId === projectId,
-    );
-  }
-
-  const matchedScopes = scope.knownScopes.filter((candidate) =>
-    [candidate.qualifiedName, ...candidate.aliases].some((name) =>
-      mentions(query, name),
-    ),
-  );
-  return matchedScopes.length === 1 ? matchedScopes : [];
+    return selectExplicitScopes(scope.knownScopes, explicit);
+  return selectMentionedScopes(scope.knownScopes, query);
 }
 
-export function hasWorkspaceWideIntent(query: string): boolean {
-  return /\b(?:all|entire)\s+(?:project|repositories|repos)\b|(?:프로젝트|저장소|리포지토리|레포)\s*(?:전체|전반)|(?:모든|전체)\s*(?:저장소|리포지토리|레포)/iu.test(
-    query,
-  );
-}
+const PROJECT_WIDE_INTENT =
+  /\b(?:all|entire)\s+(?:project|repositories|repos)\b|(?:프로젝트|저장소|리포지토리|레포)\s*(?:전체|전반)|(?:모든|전체)\s*(?:저장소|리포지토리|레포)/iu;
+export const hasWorkspaceWideIntent =
+  PROJECT_WIDE_INTENT.test.bind(PROJECT_WIDE_INTENT);
 
 export function buildScopeQueryPlan(
   scope: ResolvedScope,

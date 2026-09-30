@@ -11,6 +11,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { parseJson } from "../json.js";
 
 export interface TransformArchiveOptions {
   sourceArchive: string;
@@ -70,6 +71,101 @@ function validateArchiveEntries(entries: string[]): void {
   }
 }
 
+function scopeDocument(
+  document: TransferDocument,
+  sourceBankId: string,
+  scopeTag: string,
+): void {
+  const legacyDocumentTags = document.tags ?? [];
+  document.tags = [scopeTag];
+  if (document.retain_params) {
+    document.retain_params = {
+      ...document.retain_params,
+      observation_scopes: [[scopeTag]],
+    };
+  }
+  for (const fact of document.facts ?? []) {
+    const legacyFactTags = fact.tags ?? [];
+    fact.metadata = {
+      ...fact.metadata,
+      migration_source_bank: sourceBankId,
+      migration_source_document: document.id,
+      legacy_document_tags: JSON.stringify(legacyDocumentTags),
+      legacy_fact_tags: JSON.stringify(legacyFactTags),
+    };
+    fact.tags = [scopeTag];
+    fact.observation_scopes = [[scopeTag]];
+    // Observations are intentionally omitted so the target scope can rebuild them.
+    // A whole-bank export carries source consolidation lifecycle; retaining it would
+    // mark these facts complete while their source observations no longer exist.
+    fact.consolidated_at = undefined;
+    fact.consolidation_failed_at = undefined;
+  }
+}
+
+async function transformDocuments(
+  documentsDir: string,
+  selectedDocumentIds: string[],
+  sourceBankId: string,
+  scopeTag: string,
+): Promise<TransferDocument[]> {
+  const selected = new Set(selectedDocumentIds);
+  const documentFiles = (await readdir(documentsDir)).filter((name) =>
+    name.endsWith(".json"),
+  );
+  const kept: TransferDocument[] = [];
+  for (const file of documentFiles) {
+    const path = join(documentsDir, file);
+    const document = parseJson<TransferDocument>(
+      await readFile(path, "utf8"),
+      path,
+    );
+    if (!selected.has(document.id)) {
+      await unlink(path);
+      continue;
+    }
+    scopeDocument(document, sourceBankId, scopeTag);
+    await writeFile(path, `${JSON.stringify(document, null, 2)}\n`, {
+      mode: 0o600,
+    });
+    kept.push(document);
+  }
+  const missing = [...selected].filter(
+    (id) => !kept.some((document) => document.id === id),
+  );
+  if (missing.length)
+    throw new Error(`selected documents not found: ${missing.join(", ")}`);
+
+  return kept;
+}
+
+async function writeManifest(
+  manifest: Record<string, unknown>,
+  manifestPath: string,
+  kept: TransferDocument[],
+  sourceBankId: string,
+): Promise<number> {
+  const factCount = kept.reduce(
+    (sum, document) => sum + (document.facts?.length ?? 0),
+    0,
+  );
+  manifest.source_bank_id = sourceBankId;
+  manifest.exported_at = new Date().toISOString();
+  manifest.document_count = kept.length;
+  manifest.fact_count = factCount;
+  manifest.observation_count = 0;
+  manifest.archive_type = "documents";
+  manifest.mental_model_count = 0;
+  manifest.knowledge_page_count = 0;
+  manifest.directive_count = 0;
+  manifest.webhook_count = 0;
+  manifest.includes_history = false;
+  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, {
+    mode: 0o600,
+  });
+  return factCount;
+}
+
 export async function transformArchive(
   options: TransformArchiveOptions,
 ): Promise<TransformArchiveResult> {
@@ -95,80 +191,23 @@ export async function transformArchive(
     if (!sourceBankId)
       throw new Error("source archive manifest has no source_bank_id");
 
-    const selected = new Set(options.selectedDocumentIds);
-    const documentsDir = join(temporary, "documents");
-    const documentFiles = (await readdir(documentsDir)).filter((name) =>
-      name.endsWith(".json"),
+    const kept = await transformDocuments(
+      join(temporary, "documents"),
+      options.selectedDocumentIds,
+      sourceBankId,
+      options.scopeTag,
     );
-    const kept: TransferDocument[] = [];
-    for (const file of documentFiles) {
-      const path = join(documentsDir, file);
-      const document = JSON.parse(
-        await readFile(path, "utf8"),
-      ) as TransferDocument;
-      if (!selected.has(document.id)) {
-        await unlink(path);
-        continue;
-      }
-      const legacyDocumentTags = document.tags ?? [];
-      document.tags = [options.scopeTag];
-      if (document.retain_params) {
-        document.retain_params = {
-          ...document.retain_params,
-          observation_scopes: [[options.scopeTag]],
-        };
-      }
-      for (const fact of document.facts ?? []) {
-        const legacyFactTags = fact.tags ?? [];
-        fact.metadata = {
-          ...(fact.metadata ?? {}),
-          migration_source_bank: sourceBankId,
-          migration_source_document: document.id,
-          legacy_document_tags: JSON.stringify(legacyDocumentTags),
-          legacy_fact_tags: JSON.stringify(legacyFactTags),
-        };
-        fact.tags = [options.scopeTag];
-        fact.observation_scopes = [[options.scopeTag]];
-        // Observations are intentionally omitted so the target scope can rebuild them.
-        // A whole-bank export carries source consolidation lifecycle; retaining it would
-        // mark these facts complete while their source observations no longer exist.
-        fact.consolidated_at = undefined;
-        fact.consolidation_failed_at = undefined;
-      }
-      await writeFile(path, `${JSON.stringify(document, null, 2)}\n`, {
-        mode: 0o600,
-      });
-      kept.push(document);
-    }
-    const missing = [...selected].filter(
-      (id) => !kept.some((document) => document.id === id),
-    );
-    if (missing.length)
-      throw new Error(`selected documents not found: ${missing.join(", ")}`);
-
     for (const entry of await readdir(temporary, { withFileTypes: true })) {
       if (entry.name === "manifest.json" || entry.name === "documents")
         continue;
       await rm(join(temporary, entry.name), { recursive: true, force: true });
     }
-    const factCount = kept.reduce(
-      (sum, document) => sum + (document.facts?.length ?? 0),
-      0,
+    const factCount = await writeManifest(
+      manifest,
+      manifestPath,
+      kept,
+      sourceBankId,
     );
-    manifest.source_bank_id = sourceBankId;
-    manifest.exported_at = new Date().toISOString();
-    manifest.document_count = kept.length;
-    manifest.fact_count = factCount;
-    manifest.observation_count = 0;
-    manifest.archive_type = "documents";
-    manifest.mental_model_count = 0;
-    manifest.knowledge_page_count = 0;
-    manifest.directive_count = 0;
-    manifest.webhook_count = 0;
-    manifest.includes_history = false;
-    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, {
-      mode: 0o600,
-    });
     await rm(options.outputArchive, { force: true });
     run(
       "zip",

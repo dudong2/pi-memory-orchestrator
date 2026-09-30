@@ -22,9 +22,9 @@ function record(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-export function projectMemoryMirrorFromResult(
+function successfulProjectWrite(
   event: ToolResultEventLike,
-): ProjectMemoryMirror | null {
+): Record<string, unknown> | null {
   if (event.isError) return null;
   if (event.toolName !== "memory_add" && event.toolName !== "memory_replace")
     return null;
@@ -32,6 +32,14 @@ export function projectMemoryMirrorFromResult(
   const details = record(event.details);
   if (!input || !details || details.success !== true) return null;
   if (input.target !== "project" || details.target !== "project") return null;
+  return input;
+}
+
+export function projectMemoryMirrorFromResult(
+  event: ToolResultEventLike,
+): ProjectMemoryMirror | null {
+  const input = successfulProjectWrite(event);
+  if (!input) return null;
   const content = typeof input.content === "string" ? input.content.trim() : "";
   if (!content) return null;
   const action = event.toolName === "memory_add" ? "add" : "replace";

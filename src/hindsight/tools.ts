@@ -2,7 +2,6 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type { ScopedHindsightProvider } from "./provider.js";
 import type { ResolvedScope } from "../scope/resolver.js";
-import type { ScopeQueryMode } from "../scope/query.js";
 
 const LongMemorySchema = Type.Object({
   action: Type.Union([
@@ -45,6 +44,101 @@ function textResult(text: string, details: Record<string, unknown>) {
   return { content: [{ type: "text" as const, text }], details };
 }
 
+function requiredText(value: string | undefined, message: string): string {
+  const text = value?.trim();
+  if (!text) throw new Error(message);
+  return text;
+}
+
+async function searchLongMemory(
+  active: LongMemoryRuntime,
+  params: LongMemoryParams,
+  signal?: AbortSignal,
+) {
+  const query = requiredText(params.query, "query is required for search");
+  const outcome = await active.provider.recall(query, active.scope, {
+    mode: params.scope ?? "auto",
+    signal,
+  });
+  if (outcome.error) throw new Error(outcome.error);
+  const output = outcome.memories.length
+    ? outcome.memories
+        .map(
+          (memory, index) =>
+            `${index + 1}. [${memory.id ?? memory.memory_id ?? "unknown"}] ${memory.text}`,
+        )
+        .join("\n\n")
+    : "No relevant long-term memories found.";
+  return textResult(output, {
+    count: outcome.memories.length,
+    scopes: outcome.plan.tags,
+  });
+}
+
+async function retainLongMemory(
+  active: LongMemoryRuntime,
+  params: LongMemoryParams,
+  toolCallId: string,
+  signal?: AbortSignal,
+) {
+  const content = requiredText(
+    params.content,
+    "content is required for retain",
+  );
+  await active.provider.enqueueExplicit(active.scope, {
+    identity: `tool:${toolCallId}`,
+    content,
+  });
+  const drain = await active.provider.drain(signal, 1);
+  if (drain.completed !== 1)
+    throw new Error(
+      "long-term memory was queued but not confirmed; the durable outbox will retry it",
+    );
+  return textResult("Long-term memory stored.", {
+    success: true,
+    scope: active.scope.scopeName,
+  });
+}
+
+async function updateLongMemory(
+  active: LongMemoryRuntime,
+  params: LongMemoryParams,
+  signal?: AbortSignal,
+) {
+  const memoryId = requiredText(
+    params.memory_id,
+    "memory_id is required for correct or forget",
+  );
+  if (params.action === "correct") {
+    const newText = requiredText(
+      params.new_text,
+      "new_text is required for correct",
+    );
+    await active.provider.updateMemory(
+      memoryId,
+      { text: newText, resolve_entities: false },
+      signal,
+    );
+    return textResult(
+      "Long-term memory corrected and re-consolidation queued.",
+      { success: true, memoryId },
+    );
+  }
+  await active.provider.updateMemory(
+    memoryId,
+    {
+      state: "invalidated",
+      reason:
+        params.reason?.trim() || "Explicitly forgotten by the coding agent",
+    },
+    signal,
+  );
+  return textResult(
+    "Long-term memory invalidated. The operation is reversible.",
+    { success: true, memoryId },
+  );
+}
+
 export function registerLongMemoryTool(
   pi: ExtensionAPI,
   runtime: () => Promise<LongMemoryRuntime>,
@@ -64,77 +158,11 @@ export function registerLongMemoryTool(
     parameters: LongMemorySchema,
     async execute(toolCallId, params: LongMemoryParams, signal) {
       const active = await runtime();
-      if (params.action === "search") {
-        const query = params.query?.trim();
-        if (!query) throw new Error("query is required for search");
-        const mode = (params.scope ?? "auto") as ScopeQueryMode;
-        const outcome = await active.provider.recall(query, active.scope, {
-          mode,
-          signal,
-        });
-        if (outcome.error) throw new Error(outcome.error);
-        const output = outcome.memories.length
-          ? outcome.memories
-              .map(
-                (memory, index) =>
-                  `${index + 1}. [${memory.id ?? memory.memory_id ?? "unknown"}] ${memory.text}`,
-              )
-              .join("\n\n")
-          : "No relevant long-term memories found.";
-        return textResult(output, {
-          count: outcome.memories.length,
-          scopes: outcome.plan.tags,
-        });
-      }
-
-      if (params.action === "retain") {
-        const content = params.content?.trim();
-        if (!content) throw new Error("content is required for retain");
-        await active.provider.enqueueExplicit(active.scope, {
-          identity: `tool:${toolCallId}`,
-          content,
-        });
-        const drain = await active.provider.drain(signal, 1);
-        if (drain.completed !== 1)
-          throw new Error(
-            "long-term memory was queued but not confirmed; the durable outbox will retry it",
-          );
-        return textResult("Long-term memory stored.", {
-          success: true,
-          scope: active.scope.scopeName,
-        });
-      }
-
-      const memoryId = params.memory_id?.trim();
-      if (!memoryId)
-        throw new Error("memory_id is required for correct or forget");
-      if (params.action === "correct") {
-        const newText = params.new_text?.trim();
-        if (!newText) throw new Error("new_text is required for correct");
-        await active.provider.updateMemory(
-          memoryId,
-          { text: newText, resolve_entities: false },
-          signal,
-        );
-        return textResult(
-          "Long-term memory corrected and re-consolidation queued.",
-          { success: true, memoryId },
-        );
-      }
-
-      await active.provider.updateMemory(
-        memoryId,
-        {
-          state: "invalidated",
-          reason:
-            params.reason?.trim() || "Explicitly forgotten by the coding agent",
-        },
-        signal,
-      );
-      return textResult(
-        "Long-term memory invalidated. The operation is reversible.",
-        { success: true, memoryId },
-      );
+      if (params.action === "search")
+        return searchLongMemory(active, params, signal);
+      if (params.action === "retain")
+        return retainLongMemory(active, params, toolCallId, signal);
+      return updateLongMemory(active, params, signal);
     },
   });
 }

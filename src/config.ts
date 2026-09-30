@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-export type OrchestratorMode = "shadow" | "active";
+type OrchestratorMode = "shadow" | "active";
 
 export interface OrchestratorConfig {
   mode: OrchestratorMode;
@@ -21,7 +21,7 @@ export interface OrchestratorConfig {
   markerName: string;
 }
 
-export const DEFAULT_CONFIG_PATH = join(
+const DEFAULT_CONFIG_PATH = join(
   homedir(),
   ".config",
   "pi-memory-orchestrator",
@@ -64,28 +64,49 @@ function positiveInteger(
   return value;
 }
 
-export function parseConfig(input: unknown): OrchestratorConfig {
-  if (input === undefined || input === null) return { ...DEFAULT_CONFIG };
-  if (typeof input !== "object" || Array.isArray(input))
-    throw new Error("config must be an object");
-  const raw = input as Partial<OrchestratorConfig>;
-  const mode = raw.mode ?? DEFAULT_CONFIG.mode;
-  if (mode !== "shadow" && mode !== "active")
-    throw new Error("mode must be shadow or active");
-  const harness = raw.harness ?? DEFAULT_CONFIG.harness;
-  if (harness !== "pi" && harness !== "omp")
-    throw new Error("harness must be pi or omp");
-  const recallTypes = raw.recallTypes ?? DEFAULT_CONFIG.recallTypes;
+function validatedRecallTypes(
+  value: OrchestratorConfig["recallTypes"],
+): OrchestratorConfig["recallTypes"] {
   const allowedTypes = new Set(["world", "experience", "observation"]);
   if (
-    !Array.isArray(recallTypes) ||
-    recallTypes.length === 0 ||
-    recallTypes.some((type) => !allowedTypes.has(type))
+    !Array.isArray(value) ||
+    value.length === 0 ||
+    value.some((type) => !allowedTypes.has(type))
   ) {
     throw new Error(
       "recallTypes must contain world, experience, or observation",
     );
   }
+  return [...new Set(value)];
+}
+
+function configurationChoice<T extends string>(
+  value: T,
+  choices: readonly T[],
+  message: string,
+): T {
+  if (!choices.includes(value)) throw new Error(message);
+  return value;
+}
+
+export function parseConfig(input: unknown): OrchestratorConfig {
+  if (input === undefined || input === null) return { ...DEFAULT_CONFIG };
+  if (typeof input !== "object" || Array.isArray(input))
+    throw new Error("config must be an object");
+  const raw = input as Partial<OrchestratorConfig>;
+  const mode = configurationChoice(
+    raw.mode ?? DEFAULT_CONFIG.mode,
+    ["shadow", "active"],
+    "mode must be shadow or active",
+  );
+  const harness = configurationChoice(
+    raw.harness ?? DEFAULT_CONFIG.harness,
+    ["pi", "omp"],
+    "harness must be pi or omp",
+  );
+  const recallTypes = validatedRecallTypes(
+    raw.recallTypes ?? DEFAULT_CONFIG.recallTypes,
+  );
   if (
     raw.preferObservations !== undefined &&
     typeof raw.preferObservations !== "boolean"
@@ -98,7 +119,7 @@ export function parseConfig(input: unknown): OrchestratorConfig {
     ...raw,
     mode,
     harness,
-    recallTypes: [...new Set(recallTypes)],
+    recallTypes,
     preferObservations:
       raw.preferObservations ?? DEFAULT_CONFIG.preferObservations,
     requestTimeoutMs: positiveInteger(

@@ -1,23 +1,12 @@
 import { execFileSync } from "node:child_process";
-import {
-  cp,
-  mkdir,
-  readFile,
-  rename,
-  rm,
-  stat,
-  writeFile,
-} from "node:fs/promises";
+import { pathExists as exists } from "./lib/files.js";
+import { cp, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { loadConfig } from "../src/config.js";
 import { HERMES_SCOPE_STORE_FILE, resolveAgentRoot } from "../src/hermes.js";
 import { parseJson } from "../src/json.js";
-import {
-  createProject,
-  createScope,
-  disableProjectMemory,
-} from "../src/scope/catalog.js";
+import { createProject, createScope } from "../src/scope/catalog.js";
 
 interface MigrationProject {
   projectId: string;
@@ -50,16 +39,6 @@ function expand(path: string): string {
   if (path === "~") return homedir();
   if (path.startsWith("~/")) return join(homedir(), path.slice(2));
   return resolve(path);
-}
-
-async function exists(path: string): Promise<boolean> {
-  try {
-    await stat(path);
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
-    throw error;
-  }
 }
 
 async function backupSqlite(
@@ -195,14 +174,7 @@ const projectMap = new Map(
   plan.projects.map((project) => [project.projectId, project]),
 );
 for (const scope of plan.scopes) {
-  if (scope.kind === "global") {
-    await disableProjectMemory(config.dataDir, {
-      root: expand(scope.root),
-      name: basename(expand(scope.root)),
-      ...(scope.repositoryId ? { repositoryId: scope.repositoryId } : {}),
-    });
-    continue;
-  }
+  if (scope.kind === "global") continue;
   await createScope(config.dataDir, {
     root: expand(scope.root),
     projectId: scope.projectId,

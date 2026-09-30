@@ -1,10 +1,8 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
-import { loadConfig, resolveHindsightConnection } from "../src/config.js";
-import { HindsightClient } from "../src/hindsight/client.js";
-import { RetainOutbox } from "../src/hindsight/outbox.js";
-import { ScopedHindsightProvider } from "../src/hindsight/provider.js";
+import { loadConfig } from "../src/config.js";
+import { createScriptRuntime } from "./lib/hindsight.js";
 import { parseJson } from "../src/json.js";
 import type { ResolvedScope } from "../src/scope/resolver.js";
 
@@ -19,15 +17,9 @@ const config = {
   >,
   preferObservations: true,
 };
-const client = new HindsightClient({
-  ...resolveHindsightConnection(config),
-  requestTimeoutMs: 30_000,
+const { provider } = createScriptRuntime(config, {
+  rootDir: join(config.dataDir, "final-smoke-outbox"),
 });
-const provider = new ScopedHindsightProvider(
-  config,
-  client,
-  new RetainOutbox({ rootDir: join(config.dataDir, "final-smoke-outbox") }),
-);
 const scopes = parseJson<{ resolved: Record<string, ResolvedScope> }>(
   await readFile(join(backup, "migrations", "scopes.json"), "utf8"),
   "migration scopes",

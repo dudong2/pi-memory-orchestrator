@@ -188,6 +188,32 @@ export class RetainOutbox {
     return recovered;
   }
 
+  async #claimJob(name: string): Promise<string | null> {
+    const source = join(this.#pendingDir, name);
+    const claimId = `${name.slice(0, -".json".length)}-${process.pid}-${randomUUID()}.json`;
+    const claimed = join(this.#processingDir, claimId);
+    try {
+      // rename preserves an old pending mtime. Refresh it before the claim becomes
+      // visible, and use a unique path so stale recovery cannot target a later claim.
+      const claimedAt = new Date(this.#clock());
+      await utimes(source, claimedAt, claimedAt);
+      await rename(source, claimed);
+      return claimed;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    }
+  }
+
+  async #readClaim(claimed: string, name: string): Promise<RetainJob | null> {
+    try {
+      return parseJob(await readFile(claimed, "utf8"), claimed);
+    } catch {
+      await rename(claimed, join(this.#failedDir, name));
+      return null;
+    }
+  }
+
   async drain(
     client: RetainOperations | HindsightClient,
     options: { signal?: AbortSignal; maxJobs?: number } = {},
@@ -200,24 +226,11 @@ export class RetainOutbox {
     for (const name of names.slice(0, options.maxJobs ?? names.length)) {
       if (options.signal?.aborted) break;
       const source = join(this.#pendingDir, name);
-      const claimId = `${name.slice(0, -".json".length)}-${process.pid}-${randomUUID()}.json`;
-      const claimed = join(this.#processingDir, claimId);
-      try {
-        // rename preserves an old pending mtime. Refresh it before the claim becomes
-        // visible, and use a unique path so stale recovery cannot target a later claim.
-        const claimedAt = new Date(this.#clock());
-        await utimes(source, claimedAt, claimedAt);
-        await rename(source, claimed);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
-        throw error;
-      }
+      const claimed = await this.#claimJob(name);
+      if (!claimed) continue;
 
-      let job: RetainJob;
-      try {
-        job = parseJob(await readFile(claimed, "utf8"), claimed);
-      } catch {
-        await rename(claimed, join(this.#failedDir, name));
+      const job = await this.#readClaim(claimed, name);
+      if (!job) {
         result.failed++;
         continue;
       }

@@ -26,8 +26,14 @@ export interface TurnIdentity {
   timestamp: string;
 }
 
-function currentScopeTag(scope: ResolvedScope): string {
-  return scope.scopeTag;
+function scopeMetadata(scope: ResolvedScope): Record<string, string> {
+  return {
+    scope_id: scope.scopeId,
+    scope_name: scope.scopeName,
+    ...(scope.projectId ? { project_id: scope.projectId } : {}),
+    ...(scope.projectName ? { project_name: scope.projectName } : {}),
+    ...(scope.repositoryId ? { repository: scope.repositoryId } : {}),
+  };
 }
 
 export class ScopedHindsightProvider {
@@ -86,7 +92,7 @@ export class ScopedHindsightProvider {
     user: string,
     assistant: string,
   ): Promise<void> {
-    const scopeTag = currentScopeTag(scope);
+    const scopeTag = scope.scopeTag;
     await this.#outbox.enqueue({
       identity: `${identity.harness}:${identity.sessionId}:${identity.turnId}`,
       bankId: this.bankId(),
@@ -111,11 +117,7 @@ export class ScopedHindsightProvider {
           harness: identity.harness,
           session_id: identity.sessionId,
           turn_id: identity.turnId,
-          scope_id: scope.scopeId,
-          scope_name: scope.scopeName,
-          ...(scope.projectId ? { project_id: scope.projectId } : {}),
-          ...(scope.projectName ? { project_name: scope.projectName } : {}),
-          ...(scope.repositoryId ? { repository: scope.repositoryId } : {}),
+          ...scopeMetadata(scope),
         },
       },
     });
@@ -129,7 +131,7 @@ export class ScopedHindsightProvider {
       timestamp?: string;
     },
   ): Promise<void> {
-    const scopeTag = currentScopeTag(scope);
+    const scopeTag = scope.scopeTag;
     const timestamp = input.timestamp ?? new Date().toISOString();
     await this.#outbox.enqueue({
       identity: input.identity,
@@ -145,11 +147,7 @@ export class ScopedHindsightProvider {
         metadata: {
           source: "pi-memory-orchestrator-explicit",
           harness: this.#config.harness,
-          scope_id: scope.scopeId,
-          scope_name: scope.scopeName,
-          ...(scope.projectId ? { project_id: scope.projectId } : {}),
-          ...(scope.projectName ? { project_name: scope.projectName } : {}),
-          ...(scope.repositoryId ? { repository: scope.repositoryId } : {}),
+          ...scopeMetadata(scope),
         },
       },
     });
@@ -177,7 +175,12 @@ export class ScopedHindsightProvider {
     return this.#outbox.drain(this.#client, { signal, maxJobs });
   }
 
-  counts(): Promise<{ pending: number; processing: number; failed: number }> {
-    return this.#outbox.counts();
+  async counts(): Promise<{
+    pending: number;
+    processing: number;
+    failed: number;
+  }> {
+    const { pending, processing, failed } = await this.#outbox.counts();
+    return { pending, processing, failed };
   }
 }

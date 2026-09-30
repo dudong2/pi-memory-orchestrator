@@ -1,6 +1,9 @@
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import type {
   ExtensionAPI,
+  ExtensionCommandContext,
+  BeforeAgentStartEvent,
+  ToolResultEvent,
   ExtensionContext,
   InputEvent,
   TurnEndEvent,
@@ -24,15 +27,14 @@ import {
 } from "./hermes.js";
 import { enqueueProjectMemoryMirror } from "./mirror.js";
 import {
-  findMemoryDisabledProject,
   loadScopeCatalog,
   projectByName,
   qualifiedScopeName,
   reassignScopeProject,
   removeProjectIfEmpty,
   type ScopeCatalog,
+  type ProjectRecord,
 } from "./scope/catalog.js";
-import { resolveGitContext } from "./scope/git.js";
 import { onboardScope } from "./scope/onboarding.js";
 import {
   resolveScope,
@@ -99,7 +101,7 @@ function normalizeForDuplicateCheck(value: string): string {
 function sanitizeMemoryText(value: string): string {
   return value
     .replace(/<\/?memory-context\b[^>]*>/gi, "[memory-context tag removed]")
-    .replace(/\u0000/g, "")
+    .replaceAll("\u0000", "")
     .trim();
 }
 
@@ -125,7 +127,7 @@ function formatMemoryContext(
 }
 
 function describeScope(scope: ResolvedScope | null): string {
-  if (!scope) return "memory-disabled";
+  if (!scope) return "unregistered";
   const name = scope.projectName
     ? `${scope.projectName}/${scope.scopeName}`
     : scope.scopeName;
@@ -183,152 +185,176 @@ function formatCatalogMatches(catalog: ScopeCatalog, input: string): string[] {
   ];
 }
 
-export function createMemoryOrchestratorExtension(
-  dependencies: ExtensionDependencies = {},
-) {
-  return function memoryOrchestrator(pi: ExtensionAPI): void {
-    const config = dependencies.config ?? loadConfig();
-    const connection = resolveHindsightConnection(config);
+const unavailableScopeMessage =
+  "Long-term project memory scope could not be resolved from this filesystem location.";
+
+class OrchestratorRuntime {
+  private readonly config: OrchestratorConfig;
+  private readonly provider: ScopedHindsightProvider;
+  private readonly scopeResolver: (
+    cwd: string,
+  ) => Promise<ResolvedScope | null>;
+  private readonly clock: () => number;
+  private readonly syncHermesScopeStore: NonNullable<
+    ExtensionDependencies["syncHermesScopeStore"]
+  >;
+  private currentScope: ResolvedScope | null = null;
+  private scopeCwd = "";
+  private scopeResolved = false;
+  private scopeOnboardingComplete = false;
+  private latestUserInput = "";
+  private pendingRecall: PendingRecall | null = null;
+  private turnCounter = 0;
+  private activeDrain: Promise<void> | null = null;
+  private activeDrainController: AbortController | null = null;
+
+  constructor(
+    private readonly pi: ExtensionAPI,
+    private readonly dependencies: ExtensionDependencies,
+  ) {
+    this.config = dependencies.config ?? loadConfig();
+    const connection = resolveHindsightConnection(this.config);
     const client = new HindsightClient({
       apiUrl: connection.apiUrl,
       apiToken: connection.apiToken,
-      requestTimeoutMs: config.requestTimeoutMs,
+      requestTimeoutMs: this.config.requestTimeoutMs,
     });
     const outbox = new RetainOutbox({
-      rootDir: join(config.dataDir, "outbox"),
-      operationTimeoutMs: config.requestTimeoutMs,
+      rootDir: join(this.config.dataDir, "outbox"),
+      operationTimeoutMs: this.config.requestTimeoutMs,
     });
-    const provider =
+    this.provider =
       dependencies.provider ??
-      new ScopedHindsightProvider(config, client, outbox);
-    const scopeResolver =
-      dependencies.scopeResolver ??
-      (async (cwd: string) => {
-        try {
-          return await resolveScope(cwd, {
-            markerName: config.markerName,
-            dataDir: config.dataDir,
-            startCwd: cwd,
-          });
-        } catch (error) {
-          if (error instanceof ScopeBoundaryError) return null;
-          throw error;
-        }
-      });
-    const clock = dependencies.clock ?? Date.now;
-    const syncHermesScopeStore =
+      new ScopedHindsightProvider(this.config, client, outbox);
+    this.scopeResolver =
+      dependencies.scopeResolver ?? ((cwd) => this.resolveDefaultScope(cwd));
+    this.clock = dependencies.clock ?? Date.now;
+    this.syncHermesScopeStore =
       dependencies.syncHermesScopeStore ?? ensureHermesScopeStore;
-    const isProjectMemoryDisabled = async (cwd: string): Promise<boolean> => {
-      const git = resolveGitContext(cwd);
-      const root = resolve(git?.mainRoot ?? cwd);
-      return Boolean(
-        await findMemoryDisabledProject(
-          config.dataDir,
-          root,
-          git?.repositoryId,
-        ),
-      );
+  }
+
+  private async resolveScopeAt(cwd: string): Promise<ResolvedScope | null> {
+    return resolveScope(cwd, {
+      markerName: this.config.markerName,
+      dataDir: this.config.dataDir,
+      startCwd: cwd,
+    });
+  }
+
+  private async resolveDefaultScope(
+    cwd: string,
+  ): Promise<ResolvedScope | null> {
+    try {
+      return await this.resolveScopeAt(cwd);
+    } catch (error) {
+      if (error instanceof ScopeBoundaryError) return null;
+      throw error;
+    }
+  }
+
+  private setCurrentScope(scope: ResolvedScope | null, cwd: string): void {
+    this.currentScope = scope;
+    this.scopeCwd = cwd;
+    this.scopeResolved = true;
+  }
+
+  private async ensureScope(
+    cwd: string,
+    ctx?: ExtensionContext,
+    allowOnboarding = ctx?.mode !== "rpc",
+  ): Promise<ResolvedScope | null> {
+    const canOnboard = Boolean(
+      allowOnboarding &&
+        ctx &&
+        typeof ctx.ui?.select === "function" &&
+        !this.dependencies.scopeResolver,
+    );
+    const matchesCachedCwd = this.scopeResolved && this.scopeCwd === cwd;
+    if (
+      matchesCachedCwd &&
+      (this.currentScope || !canOnboard || this.scopeOnboardingComplete)
+    )
+      return this.currentScope;
+    if (!matchesCachedCwd) {
+      this.setCurrentScope(await this.scopeResolver(cwd), cwd);
+      this.scopeOnboardingComplete = false;
+    }
+    if (
+      !this.currentScope &&
+      canOnboard &&
+      ctx &&
+      !this.scopeOnboardingComplete
+    ) {
+      this.currentScope = await onboardScope(ctx, this.config);
+      this.scopeOnboardingComplete = true;
+    }
+    return this.currentScope;
+  }
+
+  private startRecall(prompt: string, ctx: ExtensionContext): PendingRecall {
+    const recall: PendingRecall = {
+      prompt,
+      cwd: ctx.cwd,
+      promise: this.recallScope(prompt, ctx),
     };
+    this.pendingRecall = recall;
+    return recall;
+  }
 
-    let currentScope: ResolvedScope | null = null;
-    let scopeCwd = "";
-    let scopeResolved = false;
-    let scopeOnboardingComplete = false;
-    let latestUserInput = "";
-    let pendingRecall: PendingRecall | null = null;
-    let turnCounter = 0;
-    let activeDrain: Promise<void> | null = null;
-    let activeDrainController: AbortController | null = null;
-
-    const ensureScope = async (
-      cwd: string,
-      ctx?: ExtensionContext,
-      allowOnboarding = ctx?.mode !== "rpc",
-    ): Promise<ResolvedScope | null> => {
-      const canOnboard = Boolean(
-        allowOnboarding &&
-          ctx &&
-          typeof ctx.ui?.select === "function" &&
-          !dependencies.scopeResolver,
-      );
-      const matchesCachedCwd = scopeResolved && scopeCwd === cwd;
-      if (
-        matchesCachedCwd &&
-        (currentScope || !canOnboard || scopeOnboardingComplete)
-      ) {
-        return currentScope;
-      }
-      if (!matchesCachedCwd) {
-        currentScope = await scopeResolver(cwd);
-        scopeCwd = cwd;
-        scopeResolved = true;
-        scopeOnboardingComplete = false;
-      }
-      if (!currentScope && canOnboard && ctx && !scopeOnboardingComplete) {
-        currentScope = await onboardScope(ctx, config);
-        scopeOnboardingComplete = true;
-      }
-      return currentScope;
+  private async recallScope(prompt: string, ctx: ExtensionContext) {
+    const scope = await this.ensureScope(ctx.cwd, ctx, true);
+    return {
+      scope,
+      outcome: scope
+        ? await this.provider.recall(prompt, scope, { signal: ctx.signal })
+        : null,
     };
+  }
 
-    const startRecall = (
-      prompt: string,
-      ctx: ExtensionContext,
-    ): PendingRecall => {
-      const recall: PendingRecall = {
-        prompt,
-        cwd: ctx.cwd,
-        promise: ensureScope(ctx.cwd, ctx, true).then(async (scope) => ({
-          scope,
-          outcome: scope
-            ? await provider.recall(prompt, scope, { signal: ctx.signal })
-            : null,
-        })),
-      };
-      pendingRecall = recall;
-      return recall;
-    };
+  private scheduleDrain(ctx?: ExtensionContext): void {
+    if (this.activeDrain) return;
+    const controller = new AbortController();
+    this.activeDrainController = controller;
+    this.activeDrain = this.provider
+      .drain(controller.signal, 10)
+      .then(() => undefined)
+      .catch((error: unknown) => {
+        ctx?.ui.notify(
+          `Long-term memory sync deferred: ${error instanceof Error ? error.message : String(error)}`,
+          "warning",
+        );
+      })
+      .finally(() => {
+        if (this.activeDrainController === controller)
+          this.activeDrainController = null;
+        this.activeDrain = null;
+      });
+  }
 
-    const scheduleDrain = (ctx?: ExtensionContext): void => {
-      if (activeDrain) return;
-      const controller = new AbortController();
-      activeDrainController = controller;
-      activeDrain = provider
-        .drain(controller.signal, 10)
-        .then(() => undefined)
-        .catch((error: unknown) => {
-          ctx?.ui.notify(
-            `Long-term memory sync deferred: ${error instanceof Error ? error.message : String(error)}`,
-            "warning",
-          );
-        })
-        .finally(() => {
-          if (activeDrainController === controller)
-            activeDrainController = null;
-          activeDrain = null;
-        });
-    };
+  register(): void {
+    this.registerCommands();
+    this.registerHermes();
+    this.registerLongMemory();
+    this.registerLifecycle();
+  }
 
-    pi.registerCommand("memory-orchestrator-status", {
+  private registerCommands(): void {
+    this.pi.registerCommand("memory-orchestrator-status", {
       description:
         "Show scoped memory mode, bank, scope, and durable outbox state.",
       handler: async (_args, ctx) => {
-        const scope = await ensureScope(ctx.cwd, ctx);
-        const counts = await provider.counts();
+        const scope = await this.ensureScope(ctx.cwd, ctx);
+        const counts = await this.provider.counts();
         ctx.ui.notify(
-          `pi-memory-orchestrator: mode=${config.mode}, harness=${config.harness}, bank=${provider.bankId()}, scope=${describeScope(scope)}, outbox=${JSON.stringify(counts)}`,
+          `pi-memory-orchestrator: mode=${this.config.mode}, harness=${this.config.harness}, bank=${this.provider.bankId()}, scope=${describeScope(scope)}, outbox=${JSON.stringify(counts)}`,
           "info",
         );
       },
     });
-
-    const unavailableScopeMessage =
-      "Long-term project memory scope could not be resolved from this filesystem location.";
-
-    pi.registerCommand("memory-find", {
+    this.pi.registerCommand("memory-find", {
       description: "Find registered memory Projects and Scopes by name.",
       handler: async (args, ctx) => {
-        const catalog = await loadScopeCatalog(config.dataDir);
+        const catalog = await loadScopeCatalog(this.config.dataDir);
         const sections = formatCatalogMatches(catalog, args);
         ctx.ui.notify(
           sections.length
@@ -338,293 +364,368 @@ export function createMemoryOrchestratorExtension(
         );
       },
     });
-
-    pi.registerCommand("memory-reassign-scope", {
+    this.pi.registerCommand("memory-reassign-scope", {
       description:
         "Permanently reassign the current Scope to another memory Project.",
-      handler: async (args, ctx) => {
-        const previousScope = await ensureScope(ctx.cwd, ctx);
-        if (!previousScope) {
-          ctx.ui.notify(unavailableScopeMessage, "error");
-          return;
-        }
-        if (!previousScope.projectId || !previousScope.projectName) {
-          ctx.ui.notify("현재 Scope의 Project를 확인할 수 없습니다.", "error");
-          return;
-        }
-
-        const catalog = await loadScopeCatalog(config.dataDir);
-        const candidates = Object.values(catalog.projects)
-          .filter((project) => project.projectId !== previousScope.projectId)
-          .sort((a, b) => a.name.localeCompare(b.name));
-        if (!candidates.length) {
-          ctx.ui.notify("재소속할 다른 Project가 없습니다.", "warning");
-          return;
-        }
-
-        const requested = args.trim();
-        let selectedProject = requested
-          ? projectByName(catalog, requested)
-          : undefined;
-        if (!requested) {
-          const choice = await ctx.ui.select(
-            `${previousScope.projectName}/${previousScope.scopeName}의 새 Project를 선택하세요`,
-            candidates.map((project) => project.name),
-          );
-          if (!choice) return;
-          selectedProject = candidates.find(
-            (project) => project.name === choice,
-          );
-        }
-        if (!selectedProject) {
-          ctx.ui.notify(`Project를 찾을 수 없습니다: ${requested}`, "error");
-          return;
-        }
-        if (selectedProject.projectId === previousScope.projectId) {
-          ctx.ui.notify(
-            "현재 Scope는 이미 해당 Project에 속해 있습니다.",
-            "info",
-          );
-          return;
-        }
-
-        const before = `${previousScope.projectName}/${previousScope.scopeName}`;
-        const after = `${selectedProject.name}/${previousScope.scopeName}`;
-        const confirmed = await ctx.ui.confirm(
-          "Scope Project 재소속",
-          [
-            `${before} → ${after}`,
-            "",
-            `scopeId 유지: ${previousScope.scopeId}`,
-            `memoryTag 유지: ${previousScope.scopeTag}`,
-            "",
-            "이 변경은 현재 Scope의 Project 소속을 영구적으로 바꿉니다.",
-          ].join("\n"),
-        );
-        if (!confirmed) return;
-
-        let nextScope: ResolvedScope | null = null;
-        try {
-          const record = await reassignScopeProject(
-            config.dataDir,
-            previousScope.scopeId,
-            selectedProject.projectId,
-          );
-          if (
-            record.scopeId !== previousScope.scopeId ||
-            record.memoryTag !== previousScope.scopeTag
-          ) {
-            throw new Error("Scope identity changed during reassignment");
-          }
-          nextScope = await resolveScope(previousScope.workspaceRoot, {
-            markerName: config.markerName,
-            dataDir: config.dataDir,
-            startCwd: previousScope.workspaceRoot,
-          });
-          if (
-            !nextScope ||
-            nextScope.projectId !== selectedProject.projectId ||
-            nextScope.scopeTag !== previousScope.scopeTag
-          ) {
-            throw new Error("reassigned Scope did not resolve consistently");
-          }
-          await syncHermesScopeStore(nextScope);
-        } catch (error) {
-          let rollbackDetail = "";
-          try {
-            const latest = await loadScopeCatalog(config.dataDir);
-            if (
-              latest.scopes[previousScope.scopeId]?.projectId !==
-              previousScope.projectId
-            ) {
-              await reassignScopeProject(
-                config.dataDir,
-                previousScope.scopeId,
-                previousScope.projectId,
-              );
-            }
-            const restored = await resolveScope(previousScope.workspaceRoot, {
-              markerName: config.markerName,
-              dataDir: config.dataDir,
-              startCwd: previousScope.workspaceRoot,
-            });
-            currentScope = restored ?? previousScope;
-            scopeCwd = ctx.cwd;
-            scopeResolved = true;
-            if (restored) await syncHermesScopeStore(restored);
-          } catch (rollbackError) {
-            rollbackDetail = ` Rollback verification failed: ${String(rollbackError)}`;
-          }
-          ctx.ui.notify(
-            `Scope reassignment failed: ${error instanceof Error ? error.message : String(error)}.${rollbackDetail}`,
-            "error",
-          );
-          return;
-        }
-
-        let removedSourceProject = false;
-        try {
-          removedSourceProject = Boolean(
-            await removeProjectIfEmpty(config.dataDir, previousScope.projectId),
-          );
-        } catch (error) {
-          ctx.ui.notify(
-            `Scope는 재소속됐지만 빈 원본 Project 정리는 지연됐습니다: ${error instanceof Error ? error.message : String(error)}`,
-            "warning",
-          );
-        }
-
-        currentScope = nextScope;
-        scopeCwd = ctx.cwd;
-        scopeResolved = true;
-        try {
-          await provider.ensureKnowledgeViews(nextScope, ctx.signal);
-        } catch (error) {
-          ctx.ui.notify(
-            `Scope는 재소속됐지만 Knowledge UI 갱신은 지연됐습니다: ${error instanceof Error ? error.message : String(error)}`,
-            "warning",
-          );
-        }
-        ctx.ui.notify(
-          [
-            `${before} → ${after}로 재소속했습니다. scopeId와 memoryTag는 유지됐습니다.`,
-            ...(removedSourceProject
-              ? [`빈 Project '${previousScope.projectName}'도 정리했습니다.`]
-              : []),
-          ].join("\n"),
-          "info",
-        );
-        await ctx.reload();
-        return;
-      },
+      handler: (args, ctx) => this.reassignScope(args, ctx),
     });
+  }
 
-    pi.events.on(HERMES_PROJECT_RESOLVER_EVENT, (value) => {
-      const request = value as HermesProjectResolutionRequest;
-      request.respond(
-        ensureScope(request.ctx.cwd, request.ctx).then((scope) =>
-          scope ? ensureHermesScopeStore(scope) : null,
-        ),
-      );
-    });
-
-    if (config.mode === "active") {
-      registerLongMemoryTool(pi, async () => {
-        const scope = await ensureScope(scopeCwd || process.cwd());
-        if (!scope) throw new Error(unavailableScopeMessage);
-        return { provider, scope };
-      });
+  private async chooseReassignmentTarget(
+    previous: ResolvedScope,
+    args: string,
+    ctx: ExtensionCommandContext,
+  ): Promise<ProjectRecord | null> {
+    const catalog = await loadScopeCatalog(this.config.dataDir);
+    const candidates = Object.values(catalog.projects)
+      .filter((project) => project.projectId !== previous.projectId)
+      .sort((a, b) => a.name.localeCompare(b.name));
+    if (!candidates.length) {
+      ctx.ui.notify("재소속할 다른 Project가 없습니다.", "warning");
+      return null;
     }
-
-    pi.on("session_start", async (_event, ctx) => {
-      latestUserInput = "";
-      pendingRecall = null;
-      turnCounter = 0;
-      scopeOnboardingComplete = false;
-      if (!(scopeResolved && scopeCwd === ctx.cwd)) {
-        currentScope = null;
-        scopeCwd = "";
-        scopeResolved = false;
-      }
-      const scope = await ensureScope(ctx.cwd, ctx);
-      scheduleDrain(ctx);
-      if (!scope) {
-        if (!(await isProjectMemoryDisabled(ctx.cwd))) {
-          ctx.ui.notify(unavailableScopeMessage, "warning");
-        }
-        return;
-      }
-      void provider.ensureKnowledgeViews(scope).catch((error: unknown) => {
-        ctx.ui.notify(
-          `Knowledge view refresh deferred: ${error instanceof Error ? error.message : String(error)}`,
-          "warning",
-        );
-      });
-    });
-
-    pi.on("input", async (event: InputEvent, ctx) => {
-      if (event.source === "extension") return;
-      latestUserInput = event.text.trim();
-      if (!latestUserInput) return;
-      if (config.mode === "active") {
-        startRecall(latestUserInput, ctx);
-      } else if (ctx.mode === "rpc") {
-        await ensureScope(ctx.cwd, ctx, true);
-      }
-    });
-
-    pi.on("before_agent_start", async (event, ctx) => {
-      if (config.mode !== "active") return;
-      const prompt = event.prompt.trim();
-      if (!prompt) return;
-      const recall =
-        pendingRecall?.prompt === prompt && pendingRecall.cwd === ctx.cwd
-          ? pendingRecall
-          : startRecall(prompt, ctx);
-      const { outcome } = await recall.promise;
-      if (!outcome || outcome.error || !outcome.memories.length) return;
-      const block = formatMemoryContext(outcome.memories, event.systemPrompt);
-      if (!block) return;
-      return { systemPrompt: `${event.systemPrompt}\n\n${block}` };
-    });
-
-    pi.on("tool_result", async (event, ctx) => {
-      try {
-        const scope = await ensureScope(ctx.cwd, ctx);
-        if (scope && (await enqueueProjectMemoryMirror(event, provider, scope)))
-          scheduleDrain(ctx);
-      } catch (error) {
-        ctx.ui.notify(
-          `Project memory mirror deferred: ${error instanceof Error ? error.message : String(error)}`,
-          "warning",
-        );
-      }
-    });
-
-    pi.on("turn_end", async (event: TurnEndEvent, ctx) => {
-      const user = latestUserInput.trim();
-      const assistant = extractText(event.message);
-      if (!user || !assistant) return;
-      const scope = await ensureScope(ctx.cwd, ctx);
-      if (!scope) return;
-      const sessionId = ctx.sessionManager.getSessionId();
-      const rawTimestamp = (event.message as Textish).timestamp;
-      const timestamp = messageTimestamp(rawTimestamp, clock());
-      turnCounter++;
-      await provider.enqueueTurn(
-        scope,
-        {
-          sessionId,
-          turnId: `${turnCounter}-${timestamp}`,
-          harness: config.harness,
-          timestamp,
-        },
-        user,
-        assistant,
+    const requested = args.trim();
+    let selectedProject = requested
+      ? projectByName(catalog, requested)
+      : undefined;
+    if (!requested) {
+      const choice = await ctx.ui.select(
+        `${previous.projectName}/${previous.scopeName}의 새 Project를 선택하세요`,
+        candidates.map((project) => project.name),
       );
-      scheduleDrain(ctx);
-    });
+      if (!choice) return null;
+      selectedProject = candidates.find((project) => project.name === choice);
+    }
+    if (!selectedProject) {
+      ctx.ui.notify(`Project를 찾을 수 없습니다: ${requested}`, "error");
+      return null;
+    }
+    if (selectedProject.projectId === previous.projectId) {
+      ctx.ui.notify("현재 Scope는 이미 해당 Project에 속해 있습니다.", "info");
+      return null;
+    }
+    return selectedProject;
+  }
 
-    pi.on("session_shutdown", async (_event, _ctx) => {
-      if (activeDrain) {
-        const drain = activeDrain;
-        let completed = false;
-        await Promise.race([
-          drain.then(() => {
-            completed = true;
-          }),
-          new Promise<void>((resolve) => setTimeout(resolve, 5_000)),
-        ]);
-        if (!completed) {
-          activeDrainController?.abort(
-            new Error("session shutdown drain deadline"),
-          );
-          await drain;
-        }
+  private async moveScope(
+    previous: ResolvedScope,
+    targetId: string,
+  ): Promise<ResolvedScope> {
+    const record = await reassignScopeProject(
+      this.config.dataDir,
+      previous.scopeId,
+      targetId,
+    );
+    if (
+      record.scopeId !== previous.scopeId ||
+      record.memoryTag !== previous.scopeTag
+    ) {
+      throw new Error("Scope identity changed during reassignment");
+    }
+    const nextScope = await this.resolveScopeAt(previous.workspaceRoot);
+    if (
+      !nextScope ||
+      nextScope.projectId !== targetId ||
+      nextScope.scopeTag !== previous.scopeTag
+    ) {
+      throw new Error("reassigned Scope did not resolve consistently");
+    }
+    await this.syncHermesScopeStore(nextScope);
+    return nextScope;
+  }
+
+  private async rollbackReassignment(
+    previous: ResolvedScope,
+    projectId: string,
+    ctx: ExtensionContext,
+  ): Promise<string> {
+    try {
+      const latest = await loadScopeCatalog(this.config.dataDir);
+      if (latest.scopes[previous.scopeId]?.projectId !== projectId) {
+        await reassignScopeProject(
+          this.config.dataDir,
+          previous.scopeId,
+          projectId,
+        );
       }
-      const signal = AbortSignal.timeout(5_000);
-      await provider.drain(signal, 10).catch(() => undefined);
+      const restored = await this.resolveScopeAt(previous.workspaceRoot);
+      this.setCurrentScope(restored ?? previous, ctx.cwd);
+      if (restored) await this.syncHermesScopeStore(restored);
+      return "";
+    } catch (error) {
+      return ` Rollback verification failed: ${String(error)}`;
+    }
+  }
+
+  private async removeEmptySourceProject(
+    projectId: string,
+    ctx: ExtensionContext,
+  ): Promise<boolean> {
+    try {
+      return Boolean(
+        await removeProjectIfEmpty(this.config.dataDir, projectId),
+      );
+    } catch (error) {
+      ctx.ui.notify(
+        `Scope는 재소속됐지만 빈 원본 Project 정리는 지연됐습니다: ${error instanceof Error ? error.message : String(error)}`,
+        "warning",
+      );
+      return false;
+    }
+  }
+
+  private async refreshKnowledgeViews(
+    scope: ResolvedScope,
+    ctx: ExtensionContext,
+    message: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    try {
+      await this.provider.ensureKnowledgeViews(scope, signal);
+    } catch (error) {
+      ctx.ui.notify(
+        `${message}: ${error instanceof Error ? error.message : String(error)}`,
+        "warning",
+      );
+    }
+  }
+
+  private async reassignScope(
+    args: string,
+    ctx: ExtensionCommandContext,
+  ): Promise<void> {
+    const previous = await this.ensureScope(ctx.cwd, ctx);
+    if (!previous) {
+      ctx.ui.notify(unavailableScopeMessage, "error");
+      return;
+    }
+    if (!previous.projectId || !previous.projectName) {
+      ctx.ui.notify("현재 Scope의 Project를 확인할 수 없습니다.", "error");
+      return;
+    }
+    const target = await this.chooseReassignmentTarget(previous, args, ctx);
+    if (!target) return;
+    const before = `${previous.projectName}/${previous.scopeName}`;
+    const after = `${target.name}/${previous.scopeName}`;
+    const confirmed = await ctx.ui.confirm(
+      "Scope Project 재소속",
+      [
+        `${before} → ${after}`,
+        "",
+        `scopeId 유지: ${previous.scopeId}`,
+        `memoryTag 유지: ${previous.scopeTag}`,
+        "",
+        "이 변경은 현재 Scope의 Project 소속을 영구적으로 바꿉니다.",
+      ].join("\n"),
+    );
+    if (!confirmed) return;
+    let nextScope: ResolvedScope;
+    try {
+      nextScope = await this.moveScope(previous, target.projectId);
+    } catch (error) {
+      const rollbackDetail = await this.rollbackReassignment(
+        previous,
+        previous.projectId,
+        ctx,
+      );
+      ctx.ui.notify(
+        `Scope reassignment failed: ${error instanceof Error ? error.message : String(error)}.${rollbackDetail}`,
+        "error",
+      );
+      return;
+    }
+    const removedSourceProject = await this.removeEmptySourceProject(
+      previous.projectId,
+      ctx,
+    );
+    this.setCurrentScope(nextScope, ctx.cwd);
+    await this.refreshKnowledgeViews(
+      nextScope,
+      ctx,
+      "Scope는 재소속됐지만 Knowledge UI 갱신은 지연됐습니다",
+      ctx.signal,
+    );
+    ctx.ui.notify(
+      [
+        `${before} → ${after}로 재소속했습니다. scopeId와 memoryTag는 유지됐습니다.`,
+        ...(removedSourceProject
+          ? [`빈 Project '${previous.projectName}'도 정리했습니다.`]
+          : []),
+      ].join("\n"),
+      "info",
+    );
+    await ctx.reload();
+  }
+
+  private registerHermes(): void {
+    this.pi.events.on(HERMES_PROJECT_RESOLVER_EVENT, (value) => {
+      const request = value as HermesProjectResolutionRequest;
+      request.respond(this.resolveHermesProject(request));
     });
+  }
+
+  private async resolveHermesProject(request: HermesProjectResolutionRequest) {
+    const scope = await this.ensureScope(request.ctx.cwd, request.ctx);
+    return scope ? ensureHermesScopeStore(scope) : null;
+  }
+
+  private registerLongMemory(): void {
+    if (this.config.mode !== "active") return;
+    registerLongMemoryTool(this.pi, async () => {
+      const scope = await this.ensureScope(this.scopeCwd || process.cwd());
+      if (!scope) throw new Error(unavailableScopeMessage);
+      return { provider: this.provider, scope };
+    });
+  }
+
+  private registerLifecycle(): void {
+    this.pi.on("session_start", (_event, ctx) => this.onSessionStart(ctx));
+    this.pi.on("input", (event, ctx) => this.onInput(event, ctx));
+    this.pi.on("before_agent_start", (event, ctx) =>
+      this.beforeAgentStart(event, ctx),
+    );
+    this.pi.on("tool_result", (event, ctx) => this.onToolResult(event, ctx));
+    this.pi.on("turn_end", (event, ctx) => this.onTurnEnd(event, ctx));
+    this.pi.on("session_shutdown", () => this.onShutdown());
+  }
+
+  private async onSessionStart(ctx: ExtensionContext): Promise<void> {
+    this.latestUserInput = "";
+    this.pendingRecall = null;
+    this.turnCounter = 0;
+    this.scopeOnboardingComplete = false;
+    if (!(this.scopeResolved && this.scopeCwd === ctx.cwd)) {
+      this.currentScope = null;
+      this.scopeCwd = "";
+      this.scopeResolved = false;
+    }
+    const scope = await this.ensureScope(ctx.cwd, ctx);
+    this.scheduleDrain(ctx);
+    if (!scope) {
+      ctx.ui.notify(unavailableScopeMessage, "warning");
+      return;
+    }
+    void this.refreshKnowledgeViews(
+      scope,
+      ctx,
+      "Knowledge view refresh deferred",
+    );
+  }
+
+  private async onInput(
+    event: InputEvent,
+    ctx: ExtensionContext,
+  ): Promise<void> {
+    if (event.source === "extension") return;
+    this.latestUserInput = event.text.trim();
+    if (!this.latestUserInput) return;
+    if (this.config.mode === "active") {
+      this.startRecall(this.latestUserInput, ctx);
+    } else if (ctx.mode === "rpc") {
+      await this.ensureScope(ctx.cwd, ctx, true);
+    }
+  }
+
+  private async beforeAgentStart(
+    event: BeforeAgentStartEvent,
+    ctx: ExtensionContext,
+  ) {
+    if (this.config.mode !== "active") return;
+    const prompt = event.prompt.trim();
+    if (!prompt) return;
+    const recall =
+      this.pendingRecall?.prompt === prompt &&
+      this.pendingRecall.cwd === ctx.cwd
+        ? this.pendingRecall
+        : this.startRecall(prompt, ctx);
+    const { outcome } = await recall.promise;
+    if (!outcome || outcome.error || !outcome.memories.length) return;
+    const block = formatMemoryContext(outcome.memories, event.systemPrompt);
+    if (!block) return;
+    return { systemPrompt: `${event.systemPrompt}\n\n${block}` };
+  }
+
+  private async onToolResult(
+    event: ToolResultEvent,
+    ctx: ExtensionContext,
+  ): Promise<void> {
+    try {
+      const scope = await this.ensureScope(ctx.cwd, ctx);
+      if (
+        scope &&
+        (await enqueueProjectMemoryMirror(event, this.provider, scope))
+      )
+        this.scheduleDrain(ctx);
+    } catch (error) {
+      ctx.ui.notify(
+        `Project memory mirror deferred: ${error instanceof Error ? error.message : String(error)}`,
+        "warning",
+      );
+    }
+  }
+
+  private async onTurnEnd(
+    event: TurnEndEvent,
+    ctx: ExtensionContext,
+  ): Promise<void> {
+    const user = this.latestUserInput.trim();
+    const assistant = extractText(event.message);
+    if (!user || !assistant) return;
+    const scope = await this.ensureScope(ctx.cwd, ctx);
+    if (!scope) return;
+    const sessionId = ctx.sessionManager.getSessionId();
+    const rawTimestamp = (event.message as Textish).timestamp;
+    const timestamp = messageTimestamp(rawTimestamp, this.clock());
+    this.turnCounter++;
+    await this.provider.enqueueTurn(
+      scope,
+      {
+        sessionId,
+        turnId: `${this.turnCounter}-${timestamp}`,
+        harness: this.config.harness,
+        timestamp,
+      },
+      user,
+      assistant,
+    );
+    this.scheduleDrain(ctx);
+  }
+
+  private async finishActiveDrain(): Promise<void> {
+    const drain = this.activeDrain;
+    if (!drain) return;
+    let completed = false;
+    const observeCompletion = async () => {
+      await drain;
+      completed = true;
+    };
+    await Promise.race([
+      observeCompletion(),
+      new Promise<void>((resolve) => setTimeout(resolve, 5_000)),
+    ]);
+    if (!completed) {
+      this.activeDrainController?.abort(
+        new Error("session shutdown drain deadline"),
+      );
+      await drain;
+    }
+  }
+
+  private async onShutdown(): Promise<void> {
+    await this.finishActiveDrain();
+    try {
+      await this.provider.drain(AbortSignal.timeout(5_000), 10);
+    } catch {
+      // Shutdown remains best-effort; durable outbox entries are retried next session.
+    }
+  }
+}
+
+export function createMemoryOrchestratorExtension(
+  dependencies: ExtensionDependencies = {},
+) {
+  return function memoryOrchestrator(pi: ExtensionAPI): void {
+    new OrchestratorRuntime(pi, dependencies).register();
   };
 }
 

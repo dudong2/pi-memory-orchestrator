@@ -22,7 +22,7 @@ export interface RetainRequest {
   operation_id?: string;
 }
 
-export type TagMatch = "any" | "all" | "any_strict" | "all_strict" | "exact";
+type TagMatch = "any" | "all" | "any_strict" | "all_strict" | "exact";
 
 export interface TagFilterLeaf {
   tags: string[];
@@ -119,6 +119,25 @@ export class HindsightHttpError extends Error {
     super(`Hindsight ${method} ${path} failed with HTTP ${status}`);
     this.name = "HindsightHttpError";
   }
+}
+
+async function parseResponse<T>(
+  response: Response,
+  method: string,
+  path: string,
+): Promise<T> {
+  const text = await response.text();
+  let parsed: unknown = null;
+  if (text) {
+    try {
+      parsed = JSON.parse(text) as unknown;
+    } catch {
+      parsed = text;
+    }
+  }
+  if (!response.ok)
+    throw new HindsightHttpError(response.status, method, path, parsed);
+  return (parsed ?? {}) as T;
 }
 
 export class HindsightClient {
@@ -235,18 +254,7 @@ export class HindsightClient {
       body: form,
       signal,
     });
-    const text = await response.text();
-    let parsed: unknown = null;
-    if (text) {
-      try {
-        parsed = JSON.parse(text) as unknown;
-      } catch {
-        parsed = text;
-      }
-    }
-    if (!response.ok)
-      throw new HindsightHttpError(response.status, "POST", path, parsed);
-    return (parsed ?? {}) as Record<string, unknown>;
+    return parseResponse<Record<string, unknown>>(response, "POST", path);
   }
 
   async triggerConsolidation(
@@ -351,17 +359,6 @@ export class HindsightClient {
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       signal,
     });
-    const text = await response.text();
-    let parsed: unknown = null;
-    if (text) {
-      try {
-        parsed = JSON.parse(text) as unknown;
-      } catch {
-        parsed = text;
-      }
-    }
-    if (!response.ok)
-      throw new HindsightHttpError(response.status, method, path, parsed);
-    return (parsed ?? {}) as T;
+    return parseResponse<T>(response, method, path);
   }
 }

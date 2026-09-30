@@ -3,11 +3,7 @@ import { execFileSync } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
 import { basename } from "node:path";
 
-export type MigrationAction =
-  | "import"
-  | "preserve-only"
-  | "reject"
-  | "regenerate";
+type MigrationAction = "import" | "preserve-only" | "reject" | "regenerate";
 
 export interface ScopeMapping {
   action: MigrationAction;
@@ -54,12 +50,57 @@ function readArchiveEntry<T>(archive: string, entry: string): T {
   return parseJson<T>(content, `${archive}:${entry}`);
 }
 
+function decideUserKnowledge(
+  document: ArchiveDocument,
+  mappings: Record<string, ScopeMapping>,
+): ScopeMapping {
+  const tags = new Set(document.tags ?? []);
+  if (
+    document.id.startsWith("legacy-hermes-luckycat-") ||
+    document.id.startsWith("verified-correction-no-fill-scope")
+  ) {
+    return {
+      action: "reject",
+      reason: "duplicate of the verified LuckyCat source-bank document",
+    };
+  }
+  if (
+    tags.has("historical-claim") ||
+    tags.has("legacy-reviewed") ||
+    tags.has("reviewed-eviction")
+  ) {
+    return {
+      action: "preserve-only",
+      reason:
+        "historical or reviewed legacy claim is not independently current-verified",
+    };
+  }
+  if (tags.has("migrated-curated-fact") && tags.has("project:memory")) {
+    return (
+      mappings["user-knowledge:project:memory"] ?? {
+        action: "preserve-only",
+        reason: "missing memory workspace mapping",
+      }
+    );
+  }
+  if (tags.has("migrated-curated-fact")) {
+    return {
+      action: "preserve-only",
+      reason:
+        "global curated fact remains in bounded local/global archive policy",
+    };
+  }
+  return {
+    action: "preserve-only",
+    reason: "unscoped global/session data has no safe workspace assignment",
+  };
+}
+
 function decideDocument(
   bankId: string,
   document: ArchiveDocument,
   mappings: Record<string, ScopeMapping>,
 ): ScopeMapping {
-  const tags = new Set(document.tags ?? []);
   if (bankId === "coding-agent::LuckyCat") {
     if ((document.facts?.length ?? 0) === 0)
       return { action: "reject", reason: "factless survey completion marker" };
@@ -86,47 +127,8 @@ function decideDocument(
       }
     );
   }
-  if (bankId === "user-knowledge") {
-    if (
-      document.id.startsWith("legacy-hermes-luckycat-") ||
-      document.id.startsWith("verified-correction-no-fill-scope")
-    ) {
-      return {
-        action: "reject",
-        reason: "duplicate of the verified LuckyCat source-bank document",
-      };
-    }
-    if (
-      tags.has("historical-claim") ||
-      tags.has("legacy-reviewed") ||
-      tags.has("reviewed-eviction")
-    ) {
-      return {
-        action: "preserve-only",
-        reason:
-          "historical or reviewed legacy claim is not independently current-verified",
-      };
-    }
-    if (tags.has("migrated-curated-fact") && tags.has("project:memory")) {
-      return (
-        mappings["user-knowledge:project:memory"] ?? {
-          action: "preserve-only",
-          reason: "missing memory workspace mapping",
-        }
-      );
-    }
-    if (tags.has("migrated-curated-fact")) {
-      return {
-        action: "preserve-only",
-        reason:
-          "global curated fact remains in bounded local/global archive policy",
-      };
-    }
-    return {
-      action: "preserve-only",
-      reason: "unscoped global/session data has no safe workspace assignment",
-    };
-  }
+  if (bankId === "user-knowledge")
+    return decideUserKnowledge(document, mappings);
   return { action: "preserve-only", reason: "unknown source bank" };
 }
 
@@ -134,75 +136,113 @@ function normalizedFact(text: string): string {
   return text.normalize("NFC").toLowerCase().replace(/\s+/g, " ").trim();
 }
 
+interface InventoryData {
+  documents: Array<Record<string, unknown>>;
+  pages: Array<Record<string, unknown>>;
+  factLocations: Map<
+    string,
+    Array<{ bankId: string; documentId: string; index: number }>
+  >;
+}
+
+function appendArchiveDocuments(
+  archive: string,
+  bankId: string,
+  entries: string[],
+  mappings: Record<string, ScopeMapping>,
+  data: InventoryData,
+): void {
+  const { documents, factLocations } = data;
+  for (const entry of entries.filter(
+    (name) => name.startsWith("documents/") && name.endsWith(".json"),
+  )) {
+    const document = readArchiveEntry<ArchiveDocument>(archive, entry);
+    const decision = decideDocument(bankId, document, mappings);
+    const facts = document.facts ?? [];
+    documents.push({
+      bankId,
+      archive: basename(archive),
+      documentId: document.id,
+      tags: document.tags ?? [],
+      factCount: facts.length,
+      state: "active",
+      action: decision.action,
+      reason: decision.reason,
+      ...(decision.scopeTag ? { scopeTag: decision.scopeTag } : {}),
+      sourceSha256: createHash("sha256")
+        .update(JSON.stringify(document))
+        .digest("hex"),
+    });
+    facts.forEach((fact, index) => {
+      const normalized = normalizedFact(String(fact.text ?? ""));
+      if (!normalized) return;
+      const hash = createHash("sha256").update(normalized).digest("hex");
+      factLocations.set(hash, [
+        ...(factLocations.get(hash) ?? []),
+        { bankId, documentId: document.id, index },
+      ]);
+    });
+  }
+}
+
+function appendArchivePages(
+  archive: string,
+  bankId: string,
+  entries: string[],
+  mappings: Record<string, ScopeMapping>,
+  data: InventoryData,
+): void {
+  const { pages } = data;
+  if (entries.includes("knowledge_pages.json")) {
+    const sourcePages = readArchiveEntry<Array<Record<string, unknown>>>(
+      archive,
+      "knowledge_pages.json",
+    );
+    for (const page of sourcePages) {
+      const mapping = mappings[bankId];
+      pages.push({
+        bankId,
+        id: page.id,
+        name: page.name,
+        kind: page.kind,
+        action: mapping?.action === "import" ? "regenerate" : "preserve-only",
+        reason:
+          mapping?.action === "import"
+            ? "recreate from scope-filtered source facts in the shared bank"
+            : "source bank is not imported",
+      });
+    }
+  }
+}
+
+function collectArchive(
+  archive: string,
+  mappings: Record<string, ScopeMapping>,
+  data: InventoryData,
+): void {
+  const manifest = readArchiveEntry<Record<string, unknown>>(
+    archive,
+    "manifest.json",
+  );
+  const bankId = String(manifest.source_bank_id ?? "");
+  if (!bankId) throw new Error(`archive has no source bank: ${archive}`);
+  const entries = unzip(archive, ["-Z1"]).split(/\r?\n/).filter(Boolean);
+
+  appendArchiveDocuments(archive, bankId, entries, mappings, data);
+  appendArchivePages(archive, bankId, entries, mappings, data);
+}
+
 export async function buildMigrationInventory(
   options: InventoryOptions,
 ): Promise<Record<string, unknown>> {
-  const documents: Array<Record<string, unknown>> = [];
-  const pages: Array<Record<string, unknown>> = [];
-  const factLocations = new Map<
-    string,
-    Array<{ bankId: string; documentId: string; index: number }>
-  >();
-
-  for (const archive of options.bankArchives) {
-    const manifest = readArchiveEntry<Record<string, unknown>>(
-      archive,
-      "manifest.json",
-    );
-    const bankId = String(manifest.source_bank_id ?? "");
-    if (!bankId) throw new Error(`archive has no source bank: ${archive}`);
-    const entries = unzip(archive, ["-Z1"]).split(/\r?\n/).filter(Boolean);
-    for (const entry of entries.filter(
-      (name) => name.startsWith("documents/") && name.endsWith(".json"),
-    )) {
-      const document = readArchiveEntry<ArchiveDocument>(archive, entry);
-      const decision = decideDocument(bankId, document, options.scopeMappings);
-      const facts = document.facts ?? [];
-      documents.push({
-        bankId,
-        archive: basename(archive),
-        documentId: document.id,
-        tags: document.tags ?? [],
-        factCount: facts.length,
-        state: "active",
-        action: decision.action,
-        reason: decision.reason,
-        ...(decision.scopeTag ? { scopeTag: decision.scopeTag } : {}),
-        sourceSha256: createHash("sha256")
-          .update(JSON.stringify(document))
-          .digest("hex"),
-      });
-      facts.forEach((fact, index) => {
-        const normalized = normalizedFact(String(fact.text ?? ""));
-        if (!normalized) return;
-        const hash = createHash("sha256").update(normalized).digest("hex");
-        factLocations.set(hash, [
-          ...(factLocations.get(hash) ?? []),
-          { bankId, documentId: document.id, index },
-        ]);
-      });
-    }
-    if (entries.includes("knowledge_pages.json")) {
-      const sourcePages = readArchiveEntry<Array<Record<string, unknown>>>(
-        archive,
-        "knowledge_pages.json",
-      );
-      for (const page of sourcePages) {
-        const mapping = options.scopeMappings[bankId];
-        pages.push({
-          bankId,
-          id: page.id,
-          name: page.name,
-          kind: page.kind,
-          action: mapping?.action === "import" ? "regenerate" : "preserve-only",
-          reason:
-            mapping?.action === "import"
-              ? "recreate from scope-filtered source facts in the shared bank"
-              : "source bank is not imported",
-        });
-      }
-    }
-  }
+  const data: InventoryData = {
+    documents: [],
+    pages: [],
+    factLocations: new Map(),
+  };
+  for (const archive of options.bankArchives)
+    collectArchive(archive, options.scopeMappings, data);
+  const { documents, pages, factLocations } = data;
 
   const invalidatedContent = await readFile(options.invalidatedPath, "utf8");
   const invalidatedSource = parseJson<{

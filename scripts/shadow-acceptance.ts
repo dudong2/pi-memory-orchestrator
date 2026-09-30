@@ -1,11 +1,10 @@
 import { readFileSync } from "node:fs";
+import { nearestRankPercentile as percentile } from "./lib/statistics.js";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
-import { loadConfig, resolveHindsightConnection } from "../src/config.js";
-import { HindsightClient } from "../src/hindsight/client.js";
-import { RetainOutbox } from "../src/hindsight/outbox.js";
-import { ScopedHindsightProvider } from "../src/hindsight/provider.js";
+import { loadConfig } from "../src/config.js";
+import { createScriptRuntime, createOperationWaiter } from "./lib/hindsight.js";
 import type { ResolvedScope } from "../src/scope/resolver.js";
 import {
   acceptanceScope as scope,
@@ -24,15 +23,15 @@ const config = {
   shadowBankId: "coding-agent::dudong2::acceptance-v2",
   requestTimeoutMs: 180_000,
 };
-const connection = resolveHindsightConnection(config);
-const client = new HindsightClient({ ...connection, requestTimeoutMs: 30_000 });
-const outbox = new RetainOutbox({
+const { client, outbox, provider } = createScriptRuntime(config, {
   rootDir: join(config.dataDir, "acceptance-outbox-v2"),
   operationTimeoutMs: 180_000,
   pollIntervalMs: 250,
   maxAttempts: 20,
 });
-const provider = new ScopedHindsightProvider(config, client, outbox);
+const waitForOperation = createOperationWaiter(client, provider.bankId(), {
+  messageStyle: "status-first",
+});
 
 const turns: Array<{
   sessionId: string;
@@ -258,32 +257,6 @@ process.stdout.write(
   })}\n`,
 );
 if (failures.length || report.p95Ms > 5_000) process.exitCode = 1;
-
-async function waitForOperation(
-  operationId: string,
-  timeoutMs: number,
-): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const operation = await client.operationStatus(
-      provider.bankId(),
-      operationId,
-    );
-    const status = operation.status.toLowerCase();
-    if (status === "completed") return;
-    if (status === "failed" || status === "cancelled")
-      throw new Error(`operation ${status}: ${operationId}`);
-    await new Promise((resolve) => setTimeout(resolve, 500));
-  }
-  throw new Error(`operation timed out: ${operationId}`);
-}
-
-function percentile(values: number[], p: number): number {
-  const sorted = [...values].sort((a, b) => a - b);
-  return (
-    sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * p) - 1)] ?? 0
-  );
-}
 
 async function readCredits(): Promise<unknown> {
   const env = readFileSync(

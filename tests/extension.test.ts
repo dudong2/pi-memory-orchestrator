@@ -7,13 +7,9 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { DEFAULT_CONFIG } from "../src/config.js";
 import { createMemoryOrchestratorExtension } from "../src/index.js";
 import type { ScopedHindsightProvider } from "../src/hindsight/provider.js";
-import {
-  createProject,
-  createScope,
-  disableProjectMemory,
-} from "../src/scope/catalog.js";
+import { createProject, createScope } from "../src/scope/catalog.js";
 import type { ResolvedScope } from "../src/scope/resolver.js";
-import { scope } from "./fixtures.js";
+import { scope, writeVersion3Catalog } from "./fixtures.js";
 
 function harness(
   mode: "shadow" | "active",
@@ -129,7 +125,7 @@ test("RPC startup defers Scope onboarding until the first user input", async () 
     mode: "rpc",
     select: async () => {
       selections++;
-      return "이 Project에서 메모리 사용 안 함";
+      return undefined;
     },
   });
 
@@ -166,7 +162,7 @@ test("TUI startup still offers Scope onboarding immediately", async () => {
     mode: "tui",
     select: async () => {
       selections++;
-      return "이 Project에서 메모리 사용 안 함";
+      return undefined;
     },
   });
 
@@ -175,10 +171,10 @@ test("TUI startup still offers Scope onboarding immediately", async () => {
   assert.equal(selections, 1);
 });
 
-test("a memory-disabled Project starts without an unresolved-Scope warning", async () => {
-  const root = await mkdtemp(join(tmpdir(), "memory-disabled-startup-"));
+test("legacy memory exclusion no longer skips startup onboarding or its warning", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memory-legacy-startup-"));
   const dataDir = join(root, "state");
-  await disableProjectMemory(dataDir, { root, name: "scratchpad" });
+  await writeVersion3Catalog(dataDir, root);
   const runtime = harness("active", null, dataDir, true);
   let selections = 0;
   const ctx = context(runtime.notifications, {
@@ -192,14 +188,14 @@ test("a memory-disabled Project starts without an unresolved-Scope warning", asy
 
   await runtime.handlers.get("session_start")?.[0]?.({}, ctx);
 
-  assert.equal(selections, 0);
+  assert.equal(selections, 1);
   assert.equal(
     runtime.notifications.some(
       ({ message, level }) =>
         level === "warning" &&
         message.includes("memory scope could not be resolved"),
     ),
-    false,
+    true,
   );
 });
 

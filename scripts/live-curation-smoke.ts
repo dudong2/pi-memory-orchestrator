@@ -1,18 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { HindsightClient } from "../src/hindsight/client.js";
+import {
+  loadDirectHindsightClient,
+  createOperationWaiter,
+} from "./lib/hindsight.js";
 import { deterministicOperationId } from "../src/hindsight/outbox.js";
-import { parseJson } from "../src/json.js";
 
-const connection = parseJson<{ apiUrl: string; apiToken: string }>(
-  readFileSync(`${process.env.HOME}/.hindsight/coding-agent.json`, "utf8"),
-  "Hindsight connection",
-);
-const client = new HindsightClient({
-  apiUrl: connection.apiUrl,
-  apiToken: connection.apiToken,
-  requestTimeoutMs: 30_000,
-});
+const client = loadDirectHindsightClient();
 const bankId = "coding-agent::dudong2::shadow";
 const token = `curationprobe-${randomUUID()}`;
 const tag = `scope:workspace:${token}`;
@@ -31,13 +24,8 @@ await client.retain(bankId, {
     },
   ],
 });
-const deadline = Date.now() + 180_000;
-while (Date.now() < deadline) {
-  const status = await client.operationStatus(bankId, operationId);
-  if (status.status === "completed") break;
-  if (status.status === "failed") throw new Error("retain failed");
-  await new Promise((resolve) => setTimeout(resolve, 500));
-}
+await createOperationWaiter(client, bankId)(operationId, 180_000);
+
 const search = () =>
   client.recall(bankId, {
     query: token,

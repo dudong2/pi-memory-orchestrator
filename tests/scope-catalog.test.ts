@@ -24,6 +24,7 @@ import {
 } from "../src/scope/catalog.js";
 import { resolveGitContext } from "../src/scope/git.js";
 import { resolveScope } from "../src/scope/resolver.js";
+import { writeVersion3Catalog } from "./fixtures.js";
 
 async function tempRoot(prefix: string): Promise<string> {
   return mkdtemp(join(tmpdir(), prefix));
@@ -33,7 +34,7 @@ function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8" }).trim();
 }
 
-test("an unregistered location stays memory-disabled and creates no marker", async () => {
+test("an unregistered location resolves to no Scope and creates no marker", async () => {
   const root = await tempRoot("memory-catalog-unregistered-");
   const dataDir = join(root, "state");
   const scope = await resolveScope(root, { dataDir, startCwd: root });
@@ -76,7 +77,7 @@ test("global Scope creation is rejected", async () => {
   await assert.rejects(access(join(root, ".pi-memory-scope.json")));
 });
 
-test("a version 2 global Scope migrates to a memory-disabled Project", async () => {
+test("a version 2 global Scope is retired without creating a memory exclusion", async () => {
   const parent = await tempRoot("memory-catalog-global-migration-");
   const scratchpad = join(parent, "scratchpad");
   const dataDir = join(parent, "state");
@@ -119,17 +120,44 @@ test("a version 2 global Scope migrates to a memory-disabled Project", async () 
 
   const catalog = await loadScopeCatalog(dataDir);
 
-  assert.equal(catalog.version, 3);
+  assert.equal(catalog.version, 4);
   assert.deepEqual(catalog.scopes, {});
-  assert.deepEqual(
-    Object.values(catalog.memoryDisabledProjects).map((record) => record.name),
-    ["scratchpad"],
-  );
+  assert.equal("memoryDisabledProjects" in catalog, false);
   await assert.rejects(access(markerPath));
   assert.equal(
     await resolveScope(scratchpad, { dataDir, startCwd: scratchpad }),
     null,
   );
+});
+
+test("version 3 migration removes exclusions while preserving registered records and markers", async () => {
+  const root = await tempRoot("memory-catalog-v3-migration-");
+  const dataDir = join(root, "state");
+  const project = await createProject(dataDir, "Product");
+  const registered = await createScope(dataDir, {
+    root,
+    projectId: project.projectId,
+    name: "backend",
+  });
+  const previous = await loadScopeCatalog(dataDir);
+  const markerBefore = await readFile(registered.markerPath, "utf8");
+  await writeVersion3Catalog(dataDir, root, previous);
+
+  const catalog = await loadScopeCatalog(dataDir);
+
+  assert.equal(catalog.version, 4);
+  assert.deepEqual(catalog.projects, previous.projects);
+  assert.deepEqual(catalog.scopes, previous.scopes);
+  assert.equal("memoryDisabledProjects" in catalog, false);
+  assert.equal(await readFile(registered.markerPath, "utf8"), markerBefore);
+  assert.deepEqual(
+    JSON.parse(await readFile(join(dataDir, "scope-catalog.json"), "utf8")),
+    catalog,
+  );
+  assert.deepEqual(await loadScopeCatalog(dataDir), catalog);
+  const resolved = await resolveScope(root, { dataDir, startCwd: root });
+  assert.equal(resolved?.scopeId, registered.scopeId);
+  assert.equal(resolved?.scopeTag, registered.memoryTag);
 });
 
 test("a child directory does not inherit an ancestor scope", async () => {
@@ -430,5 +458,5 @@ test("project lookup is case-insensitive and aliases are explicit", async () => 
   const stored = JSON.parse(
     await readFile(join(root, "scope-catalog.json"), "utf8"),
   );
-  assert.equal(stored.version, 3);
+  assert.equal(stored.version, 4);
 });

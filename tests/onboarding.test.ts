@@ -12,6 +12,7 @@ import {
   loadScopeCatalog,
 } from "../src/scope/catalog.js";
 import { onboardScope } from "../src/scope/onboarding.js";
+import { writeVersion3Catalog } from "./fixtures.js";
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8" }).trim();
@@ -44,17 +45,15 @@ function context(
   } as unknown as ExtensionContext;
 }
 
-test("choosing no memory permanently excludes the Project without creating a Scope", async () => {
+test("cancelling onboarding does not permanently exclude the Project", async () => {
   const root = await mkdtemp(join(tmpdir(), "memory-onboarding-none-"));
   const config = { ...DEFAULT_CONFIG, dataDir: join(root, "state") };
-  const firstScope = await onboardScope(
-    context(root, ["이 Project에서 메모리 사용 안 함"]),
-    config,
-  );
+  const firstScope = await onboardScope(context(root, []), config);
   assert.equal(firstScope, null);
   await assert.rejects(access(join(root, config.markerName)));
   const catalog = await loadScopeCatalog(config.dataDir);
-  assert.equal(Object.values(catalog.memoryDisabledProjects).length, 1);
+  assert.deepEqual(catalog.projects, {});
+  assert.deepEqual(catalog.scopes, {});
 
   const secondSelectOptions: string[][] = [];
   const secondScope = await onboardScope(
@@ -62,29 +61,34 @@ test("choosing no memory permanently excludes the Project without creating a Sco
     config,
   );
   assert.equal(secondScope, null);
-  assert.deepEqual(secondSelectOptions, []);
+  assert.equal(secondSelectOptions.length, 1);
 });
 
-test("Project selection never offers a global Scope", async () => {
+test("Project selection offers neither a global Scope nor persistent memory exclusion", async () => {
   const root = await mkdtemp(join(tmpdir(), "memory-onboarding-no-global-"));
   const config = { ...DEFAULT_CONFIG, dataDir: join(root, "state") };
   const selectOptions: string[][] = [];
 
   const scope = await onboardScope(
-    context(
-      root,
-      ["이 Project에서 메모리 사용 안 함"],
-      [],
-      [],
-      [],
-      [],
-      selectOptions,
-    ),
+    context(root, [], [], [], [], [], selectOptions),
     config,
   );
 
   assert.equal(scope, null);
-  assert.equal(selectOptions[0]?.includes("global"), false);
+  assert.deepEqual(selectOptions[0], ["새 Project 만들기"]);
+});
+
+test("legacy memory exclusion does not prevent explicit Scope registration", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memory-onboarding-legacy-"));
+  const config = { ...DEFAULT_CONFIG, dataDir: join(root, "state") };
+  const project = await createProject(config.dataDir, "Product");
+  const catalog = await loadScopeCatalog(config.dataDir);
+  await writeVersion3Catalog(config.dataDir, root, catalog);
+
+  const scope = await onboardScope(context(root, ["Product"]), config);
+
+  assert.equal(scope?.projectId, project.projectId);
+  await access(join(root, config.markerName));
 });
 
 test("choosing an existing Project names the Scope from its directory without prompting", async () => {
@@ -116,13 +120,7 @@ test("a renamed repository rebinds the existing Scope without Project onboarding
     name: "signals",
     repositoryId: "github.com/dudong2/before",
   });
-  git(
-    root,
-    "remote",
-    "set-url",
-    "origin",
-    "git@github.com:dudong2/after.git",
-  );
+  git(root, "remote", "set-url", "origin", "git@github.com:dudong2/after.git");
   const selectPrompts: string[] = [];
 
   const scope = await onboardScope(
@@ -149,13 +147,7 @@ test("declining a repository rebind does not fall through to Project onboarding"
     name: "signals",
     repositoryId: "github.com/dudong2/before",
   });
-  git(
-    root,
-    "remote",
-    "set-url",
-    "origin",
-    "git@github.com:dudong2/after.git",
-  );
+  git(root, "remote", "set-url", "origin", "git@github.com:dudong2/after.git");
   const selectPrompts: string[] = [];
 
   const scope = await onboardScope(

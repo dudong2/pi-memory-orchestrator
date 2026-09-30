@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
+import { createJsonGetter } from "./lib/hindsight.js";
 import { readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parseJson } from "../src/json.js";
@@ -56,7 +57,9 @@ const connection = parseJson<{ apiUrl: string; apiToken: string }>(
   "Hindsight connection",
 );
 const bank = encodeURIComponent(config.bankId);
-const headers = { Authorization: `Bearer ${connection.apiToken}` };
+const get = createJsonGetter<any>(connection.apiUrl, {
+  Authorization: `Bearer ${connection.apiToken}`,
+});
 const health = await get("/health");
 const consolidation = await get(
   `/v1/default/banks/${bank}/operations/${migration.consolidationOperationId}`,
@@ -179,12 +182,3 @@ process.stdout.write(
   })}\n`,
 );
 if (!passed) process.exitCode = 1;
-
-async function get(path: string): Promise<any> {
-  const response = await fetch(`${connection.apiUrl}${path}`, {
-    headers,
-    signal: AbortSignal.timeout(30_000),
-  });
-  if (!response.ok) throw new Error(`GET ${path}: HTTP ${response.status}`);
-  return response.json();
-}

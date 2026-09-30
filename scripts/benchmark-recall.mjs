@@ -1,16 +1,26 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { performance } from "node:perf_hooks";
+import { parseJson } from "../src/json.ts";
+
+const SIDECAR_API_URL = process.env.SIDECAR_API_URL ?? "http://127.0.0.1:18911";
+const OPENROUTER_CREDITS_URL = "https://openrouter.ai/api/v1/credits";
 
 const [label, outputPath, baselinePath] = process.argv.slice(2);
 if (!label || !outputPath || !baselinePath) {
-  throw new Error("usage: node scripts/benchmark-recall.mjs <label> <output.json> <baseline.json>");
+  throw new Error(
+    "usage: node scripts/benchmark-recall.mjs <label> <output.json> <baseline.json>",
+  );
 }
 
-const client = JSON.parse(readFileSync(`${process.env.HOME}/.hindsight/coding-agent.json`, "utf8"));
-const endpoint = process.env.SIDECAR_API_URL ?? "http://127.0.0.1:18911";
-const headers = { Authorization: `Bearer ${client.apiToken}`, "Content-Type": "application/json" };
-const baseline = JSON.parse(await readFile(baselinePath, "utf8"));
+const clientPath = `${process.env.HOME}/.hindsight/coding-agent.json`;
+const client = parseJson(readFileSync(clientPath, "utf8"), clientPath);
+const endpoint = SIDECAR_API_URL;
+const headers = {
+  Authorization: `Bearer ${client.apiToken}`,
+  "Content-Type": "application/json",
+};
+const baseline = parseJson(await readFile(baselinePath, "utf8"), baselinePath);
 const querySet = baseline.map(({ bankId, query }) => ({ bankId, query }));
 
 async function waitUntilHealthy() {
@@ -18,7 +28,10 @@ async function waitUntilHealthy() {
   let lastError = "not started";
   while (Date.now() < deadline) {
     try {
-      const response = await fetch(`${endpoint}/health`, { headers, signal: AbortSignal.timeout(2_000) });
+      const response = await fetch(`${endpoint}/health`, {
+        headers,
+        signal: AbortSignal.timeout(2_000),
+      });
       if (response.ok) return;
       lastError = `HTTP ${response.status}`;
     } catch (error) {
@@ -32,12 +45,20 @@ async function waitUntilHealthy() {
 async function recall(item) {
   const started = performance.now();
   try {
-    const response = await fetch(`${endpoint}/v1/default/banks/${encodeURIComponent(item.bankId)}/memories/recall`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ query: item.query, budget: "mid", max_tokens: 1_024, types: ["observation"] }),
-      signal: AbortSignal.timeout(30_000),
-    });
+    const response = await fetch(
+      `${endpoint}/v1/default/banks/${encodeURIComponent(item.bankId)}/memories/recall`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          query: item.query,
+          budget: "mid",
+          max_tokens: 1_024,
+          types: ["observation"],
+        }),
+        signal: AbortSignal.timeout(30_000),
+      },
+    );
     const body = await response.json();
     return {
       ...item,
@@ -48,7 +69,13 @@ async function recall(item) {
       error: response.ok ? undefined : body,
     };
   } catch (error) {
-    return { ...item, ok: false, durationMs: performance.now() - started, results: [], error: String(error) };
+    return {
+      ...item,
+      ok: false,
+      durationMs: performance.now() - started,
+      results: [],
+      error: String(error),
+    };
   }
 }
 
@@ -63,7 +90,9 @@ function resultIdentity(result) {
 }
 
 function topOverlap(current, original, limit = 5) {
-  const expected = new Set((original?.result?.results ?? []).slice(0, limit).map(resultIdentity));
+  const expected = new Set(
+    (original?.result?.results ?? []).slice(0, limit).map(resultIdentity),
+  );
   if (!expected.size) return null;
   const actual = current.slice(0, limit).map(resultIdentity);
   return actual.filter((id) => expected.has(id)).length / expected.size;
@@ -73,7 +102,7 @@ async function readCredits() {
   const key = process.env.HINDSIGHT_API_RERANKER_OPENROUTER_API_KEY;
   if (!key) return null;
   try {
-    const response = await fetch("https://openrouter.ai/api/v1/credits", {
+    const response = await fetch(OPENROUTER_CREDITS_URL, {
       headers: { Authorization: `Bearer ${key}` },
       signal: AbortSignal.timeout(10_000),
     });
@@ -93,16 +122,20 @@ for (let repeat = 0; repeat < 3; repeat++) {
 const concurrent = [];
 for (let round = 0; round < 3; round++) {
   const group = querySet.slice(0, 4);
-  concurrent.push(...await Promise.all(group.map(recall)));
+  concurrent.push(...(await Promise.all(group.map(recall))));
 }
 const creditsAfter = await readCredits();
 
 const successful = [...sequential, ...concurrent].filter((row) => row.ok);
 const durations = successful.map((row) => row.durationMs);
-const overlaps = sequential.map((row) => {
-  const original = baseline.find((item) => item.bankId === row.bankId && item.query === row.query);
-  return topOverlap(row.results, original);
-}).filter((value) => value !== null);
+const overlaps = sequential
+  .map((row) => {
+    const original = baseline.find(
+      (item) => item.bankId === row.bankId && item.query === row.query,
+    );
+    return topOverlap(row.results, original);
+  })
+  .filter((value) => value !== null);
 
 const report = {
   label,
@@ -115,7 +148,9 @@ const report = {
     p50Ms: percentile(durations, 0.5),
     p95Ms: percentile(durations, 0.95),
     maxMs: durations.length ? Math.max(...durations) : null,
-    meanTop5Overlap: overlaps.length ? overlaps.reduce((a, b) => a + b, 0) / overlaps.length : null,
+    meanTop5Overlap: overlaps.length
+      ? overlaps.reduce((a, b) => a + b, 0) / overlaps.length
+      : null,
   },
   creditsBefore,
   creditsAfter,
@@ -123,5 +158,7 @@ const report = {
   concurrent,
 };
 
-await writeFile(outputPath, `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 });
+await writeFile(outputPath, `${JSON.stringify(report, null, 2)}\n`, {
+  mode: 0o600,
+});
 console.log(JSON.stringify(report.metrics));

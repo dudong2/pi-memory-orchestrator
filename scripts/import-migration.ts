@@ -1,4 +1,5 @@
 import { basename } from "node:path";
+import { createOperationWaiter } from "./lib/hindsight.js";
 import { readFile } from "node:fs/promises";
 import { loadConfig, resolveHindsightConnection } from "../src/config.js";
 import { HindsightClient } from "../src/hindsight/client.js";
@@ -16,6 +17,7 @@ const client = new HindsightClient({
   ...connection,
   requestTimeoutMs: 180_000,
 });
+const waitForOperation = createOperationWaiter(client, bankId);
 const archive = await readFile(archivePath);
 const imported = await client.importDocuments(
   bankId,
@@ -34,19 +36,3 @@ const consolidationOperationId =
 if (consolidationOperationId)
   await waitForOperation(consolidationOperationId, 300_000);
 process.stdout.write(`${JSON.stringify({ imported, consolidation })}\n`);
-
-async function waitForOperation(
-  operationId: string,
-  timeoutMs: number,
-): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const operation = await client.operationStatus(bankId, operationId);
-    const status = operation.status.toLowerCase();
-    if (status === "completed") return;
-    if (status === "failed" || status === "cancelled")
-      throw new Error(`operation ${operationId} ${status}`);
-    await new Promise((resolve) => setTimeout(resolve, 500));
-  }
-  throw new Error(`operation ${operationId} timed out`);
-}

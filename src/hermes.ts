@@ -34,7 +34,7 @@ export function resolveAgentRoot(env: NodeJS.ProcessEnv = process.env): string {
     : join(homedir(), ".pi", "agent");
 }
 
-export function hermesScopeMemoryDir(
+function hermesScopeMemoryDir(
   scopeId: string,
   agentRoot = resolveAgentRoot(),
 ): string {
@@ -52,47 +52,66 @@ function entries(content: string): string[] {
   return trimmed ? trimmed.split("\n§\n").filter(Boolean) : [];
 }
 
+type RecoveryPath = { source: string; destination: string };
+
+async function readMemoryEntries(path: string): Promise<string[] | null> {
+  try {
+    return entries(await readFile(path, "utf8"));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    return null;
+  }
+}
+
+async function legacyRecoveryPaths(
+  legacyDir: string,
+  memoryDir: string,
+  legacyName: string,
+): Promise<RecoveryPath[]> {
+  try {
+    return (await readdir(legacyDir)).flatMap((name) =>
+      name.startsWith(".MEMORY.md.recovery-")
+        ? [
+            {
+              source: join(legacyDir, name),
+              destination: join(
+                memoryDir,
+                ".legacy-recovery",
+                legacyName,
+                name,
+              ),
+            },
+          ]
+        : [],
+    );
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    return [];
+  }
+}
+
 async function mergeLegacyHermesMemory(
   scope: ResolvedScope,
   memoryDir: string,
   agentRoot: string,
 ): Promise<void> {
   const target = join(memoryDir, "MEMORY.md");
-  let targetEntries: string[] = [];
-  try {
-    targetEntries = entries(await readFile(target, "utf8"));
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-  }
+  let targetEntries = (await readMemoryEntries(target)) ?? [];
 
   const sourcePaths: string[] = [];
-  const recoveryPaths: Array<{ source: string; destination: string }> = [];
+  const recoveryPaths: RecoveryPath[] = [];
   for (const legacyName of scope.legacyHermesNames) {
     if (legacyName === scope.scopeId) continue;
     const legacyDir = join(agentRoot, "projects-memory", legacyName);
     const source = join(legacyDir, "MEMORY.md");
-    try {
-      targetEntries = [
-        ...new Set([
-          ...targetEntries,
-          ...entries(await readFile(source, "utf8")),
-        ]),
-      ];
+    const sourceEntries = await readMemoryEntries(source);
+    if (sourceEntries !== null) {
+      targetEntries = [...new Set([...targetEntries, ...sourceEntries])];
       sourcePaths.push(source);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
-    try {
-      for (const name of await readdir(legacyDir)) {
-        if (!name.startsWith(".MEMORY.md.recovery-")) continue;
-        recoveryPaths.push({
-          source: join(legacyDir, name),
-          destination: join(memoryDir, ".legacy-recovery", legacyName, name),
-        });
-      }
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    }
+    recoveryPaths.push(
+      ...(await legacyRecoveryPaths(legacyDir, memoryDir, legacyName)),
+    );
   }
 
   if (targetEntries.length) {

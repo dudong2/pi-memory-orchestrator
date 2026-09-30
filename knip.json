@@ -1,0 +1,12 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "entry": [
+    "src/index.ts",
+    "src/migration/cli.ts",
+    "scripts/*.{ts,mjs}",
+    "tests/*.test.ts",
+    "tests/cross-runtime-*.ts"
+  ],
+  "project": ["src/**/*.ts", "scripts/**/*.{ts,mjs}", "tests/**/*.ts"],
+  "ignoreBinaries": ["patch", "sqlite3"]
+}

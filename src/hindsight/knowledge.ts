@@ -100,6 +100,61 @@ function pageTrigger() {
   };
 }
 
+async function retireGeneratedPages(
+  api: KnowledgeApi,
+  bankId: string,
+  siblings: KnowledgeNode[],
+  currentPageName: string,
+  scope: ResolvedScope,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (!api.deleteKnowledgeNode) return;
+  for (const candidatePage of siblings) {
+    const tags = Array.isArray(candidatePage.tags) ? candidatePage.tags : [];
+    const generatedPage =
+      candidatePage.name === "Scope overview" ||
+      candidatePage.name.startsWith("Repository: ");
+    if (
+      candidatePage.kind === "page" &&
+      candidatePage.name !== currentPageName &&
+      generatedPage &&
+      tags.includes(scope.scopeTag)
+    ) {
+      await api.deleteKnowledgeNode(bankId, candidatePage.id, signal);
+    }
+  }
+}
+
+async function retireScopeFolders(
+  api: KnowledgeApi,
+  bankId: string,
+  siblings: KnowledgeNode[],
+  scope: ResolvedScope,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (!api.deleteKnowledgeNode) return;
+  const currentProjectName = `${scope.projectName} [${scope.projectId}]`;
+  const scopeIdSuffix = ` [${scope.scopeId}]`;
+  for (const candidateProject of siblings) {
+    if (
+      candidateProject.kind !== "folder" ||
+      candidateProject.name === currentProjectName
+    ) {
+      continue;
+    }
+    const children = candidateProject.children ?? [];
+    const staleScope = children.find(
+      (child) => child.kind === "folder" && child.name.endsWith(scopeIdSuffix),
+    );
+    if (!staleScope) continue;
+    await api.deleteKnowledgeNode(
+      bankId,
+      children.length === 1 ? candidateProject.id : staleScope.id,
+      signal,
+    );
+  }
+}
+
 export async function ensureKnowledgeViews(
   api: KnowledgeApi | HindsightClient,
   bankId: string,
@@ -162,46 +217,15 @@ export async function ensureKnowledgeViews(
   )
     createdPages++;
 
-  if (api.deleteKnowledgeNode) {
-    for (const candidatePage of scopeFolder.children) {
-      const tags = Array.isArray(candidatePage.tags)
-        ? candidatePage.tags
-        : [];
-      const generatedPage =
-        candidatePage.name === "Scope overview" ||
-        candidatePage.name.startsWith("Repository: ");
-      if (
-        candidatePage.kind === "page" &&
-        candidatePage.name !== currentPageName &&
-        generatedPage &&
-        tags.includes(scope.scopeTag)
-      ) {
-        await api.deleteKnowledgeNode(bankId, candidatePage.id, signal);
-      }
-    }
-
-    const currentProjectName = `${scope.projectName} [${scope.projectId}]`;
-    const scopeIdSuffix = ` [${scope.scopeId}]`;
-    for (const candidateProject of root.children) {
-      if (
-        candidateProject.kind !== "folder" ||
-        candidateProject.name === currentProjectName
-      ) {
-        continue;
-      }
-      const children = candidateProject.children ?? [];
-      const staleScope = children.find(
-        (child) =>
-          child.kind === "folder" && child.name.endsWith(scopeIdSuffix),
-      );
-      if (!staleScope) continue;
-      await api.deleteKnowledgeNode(
-        bankId,
-        children.length === 1 ? candidateProject.id : staleScope.id,
-        signal,
-      );
-    }
-  }
+  await retireGeneratedPages(
+    api,
+    bankId,
+    scopeFolder.children,
+    currentPageName,
+    scope,
+    signal,
+  );
+  await retireScopeFolders(api, bankId, root.children, scope, signal);
 
   return { createdFolders, createdPages };
 }

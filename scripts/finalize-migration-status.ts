@@ -1,4 +1,5 @@
 import { readFile, writeFile } from "node:fs/promises";
+import { createJsonGetter } from "./lib/hindsight.js";
 import { join } from "node:path";
 import { loadConfig, resolveHindsightConnection } from "../src/config.js";
 import { parseJson } from "../src/json.js";
@@ -13,7 +14,9 @@ const config = loadConfig();
 const connection = resolveHindsightConnection(config);
 const bankId = "coding-agent::dudong2";
 const bank = encodeURIComponent(bankId);
-const headers = { Authorization: `Bearer ${connection.apiToken}` };
+const get = createJsonGetter(connection.apiUrl, {
+  Authorization: `Bearer ${connection.apiToken}`,
+});
 const inventory = parseJson<{
   summary: Record<string, unknown>;
   documents: Array<{
@@ -111,15 +114,6 @@ process.stdout.write(
     consolidation: result.consolidationStatus,
   })}\n`,
 );
-
-async function get(path: string): Promise<unknown> {
-  const response = await fetch(`${connection.apiUrl}${path}`, {
-    headers,
-    signal: AbortSignal.timeout(30_000),
-  });
-  if (!response.ok) throw new Error(`GET ${path}: HTTP ${response.status}`);
-  return response.json();
-}
 
 function countNodes(nodes: Array<{ children?: unknown[] }>): number {
   return nodes.reduce(

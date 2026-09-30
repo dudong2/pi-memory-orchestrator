@@ -1,18 +1,12 @@
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { HindsightClient, type RetainItem } from "../src/hindsight/client.js";
+import type { RetainItem } from "../src/hindsight/client.js";
+import {
+  loadDirectHindsightClient,
+  createOperationWaiter,
+} from "./lib/hindsight.js";
 import { deterministicOperationId } from "../src/hindsight/outbox.js";
-import { parseJson } from "../src/json.js";
 
-const connection = parseJson<{ apiUrl: string; apiToken: string }>(
-  readFileSync(`${process.env.HOME}/.hindsight/coding-agent.json`, "utf8"),
-  "Hindsight connection",
-);
-const client = new HindsightClient({
-  apiUrl: connection.apiUrl,
-  apiToken: connection.apiToken,
-  requestTimeoutMs: 30_000,
-});
+const client = loadDirectHindsightClient();
 const bankId = "coding-agent::dudong2::shadow";
 const token = `scopeprobe-${randomUUID()}`;
 const workspaceTag = `scope:workspace:${token}`;
@@ -45,15 +39,7 @@ await client.retain(bankId, {
   ],
 });
 
-const deadline = Date.now() + 180_000;
-while (Date.now() < deadline) {
-  const status = await client.operationStatus(bankId, operationId);
-  if (status.status === "completed") break;
-  if (status.status === "failed" || status.status === "cancelled")
-    throw new Error(`retain ${status.status}`);
-  await new Promise((resolve) => setTimeout(resolve, 500));
-}
-if (Date.now() >= deadline) throw new Error("scope smoke retain timed out");
+await createOperationWaiter(client, bankId)(operationId, 180_000);
 
 const response = await client.recall(bankId, {
   query: token,

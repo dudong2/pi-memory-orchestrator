@@ -68,18 +68,16 @@ flowchart TD
     Resolve -->|Yes| Bind[Bind Project and current Scope]
     Resolve -->|Repository identity changed| Rebind{Confirm existing Scope rebind?}
     Rebind -->|Yes| Bind
-    Rebind -->|No| Disabled[Disable Scope memory for this session]
-    Resolve -->|Memory-disabled Project| Disabled[Keep Scope memory disabled]
+    Rebind -->|No| Unregistered[현재 세션은 메모리 없이 진행]
     Resolve -->|No marker or catalog match| Choose{User choice}
     Choose --> Existing[Choose existing Project]
     Choose --> New[Create new Project]
-    Choose --> None[Do not register this Project]
+    Choose --> Cancel[등록 화면 취소]
     Existing --> Scope[Create Scope with folder name]
     New --> First[Create Project and folder-named Scope]
     Scope --> Bind
     First --> Bind
-    None --> Persist[Persist memory-disabled Project identity]
-    Persist --> Disabled
+    Cancel --> Unregistered
 ```
 
 Resolution rules:
@@ -93,10 +91,11 @@ Resolution rules:
 - Existing canonical remote identities are never rewritten without that confirmation.
 - An unregistered location never creates a Scope automatically.
 - Global Scopes are not supported. Every registered Scope belongs to a Project.
-- A Project can be persistently marked as memory-disabled without creating a Scope or marker. Git repository identity is used when available; otherwise its exact directory identity is used.
 - A new Scope automatically uses the repository-root or registration-directory basename. The user is asked for a different name only when that Project already contains the same Scope name.
 
-Choosing **do not use memory for this Project** creates no Scope marker or memory store. It records only the Project identity in the control-plane catalog, so Hindsight and Hermes Scope memory remain disabled in later sessions without prompting again.
+메모리를 사용하지 않는 위치에서는 `pi-hermes-memory`와 `pi-memory-orchestrator`를 로드하지 않습니다. Project별 영구 메모리 비활성화 선택지나 제외 목록은 제공하지 않습니다.
+
+등록 화면을 취소하면 새 Scope나 marker 없이 현재 세션을 계속하며, 다음 세션에서는 다시 등록을 안내합니다. 기존 Catalog v3는 읽을 때 v4로 전환되어 비활성화 기록만 제거되고, 등록된 Project·Scope·ID·메모리 태그와 기존 기억은 유지됩니다.
 
 ## Stable identity and moves
 

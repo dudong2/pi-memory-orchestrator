@@ -14,9 +14,10 @@ import {
   type ProjectRecord,
   type ScopeMarker,
   type ScopeRecord,
+  type ScopeCatalog,
 } from "./catalog.js";
 
-export type ScopeKind = "directory" | "repository";
+type ScopeKind = "directory" | "repository";
 
 export interface ScopeReference {
   scopeId: string;
@@ -31,7 +32,7 @@ export interface ScopeReference {
   repositoryId?: string;
 }
 
-export interface ScopeLayer {
+interface ScopeLayer {
   root: string;
   markerPath: string;
   marker: ScopeMarker;
@@ -117,39 +118,18 @@ function isPathWithin(path: string, root: string): boolean {
   return child === "" || (!child.startsWith("..") && !isAbsolute(child));
 }
 
-export async function resolveScope(
-  cwd: string,
-  options: ResolveScopeOptions = {},
-): Promise<ResolvedScope | null> {
-  const markerName = options.markerName ?? DEFAULT_MARKER_NAME;
-  const dataDir = options.dataDir ?? DEFAULT_CONFIG.dataDir;
-  const home = resolve(options.homeDir ?? homedir());
-  const git = resolveGitContext(cwd);
-  const workspaceRoot = resolve(git?.mainRoot ?? options.startCwd ?? cwd);
-  if (isFilesystemRoot(workspaceRoot))
-    throw new ScopeBoundaryError(workspaceRoot);
+interface ScopeLocation {
+  cwd: string;
+  workspaceRoot: string;
+  git: GitContext | null;
+}
 
-  // Loading also migrates legacy global Scope registrations before their old
-  // marker can be interpreted as an active memory Scope.
-  await loadScopeCatalog(dataDir);
-
-  let markerPath = join(workspaceRoot, markerName);
-  if (!(await markerExists(markerPath))) {
-    markerPath =
-      (await restoreScopeMarker(
-        dataDir,
-        workspaceRoot,
-        git?.repositoryId,
-        home,
-        markerName,
-      )) ?? markerPath;
-  }
-  if (!(await markerExists(markerPath))) return null;
-
-  const marker = await readScopeMarker(markerPath);
-  const resolved = await resolveCatalogRecord(dataDir, marker);
-  const { catalog, project } = resolved;
-  let { scope } = resolved;
+async function matchRepositoryIdentity(
+  scope: ScopeRecord,
+  dataDir: string,
+  location: ScopeLocation,
+): Promise<ScopeRecord | null> {
+  const { cwd, workspaceRoot, git } = location;
   if (scope.kind === "repository" && git?.repositoryId !== scope.repositoryId) {
     const promoted =
       git &&
@@ -164,18 +144,20 @@ export async function resolveScope(
         : null;
     if (!promoted) return null;
     scope = promoted;
-    catalog.scopes[scope.scopeId] = scope;
   }
   if (scope.kind === "directory" && !isPathWithin(cwd, workspaceRoot))
     return null;
 
-  const updated = await updateScopeLocation(
-    dataDir,
-    scope.scopeId,
-    markerPath,
-    workspaceRoot,
-    home,
-  );
+  return scope;
+}
+
+function resolvedScopeView(
+  updated: ScopeRecord,
+  catalog: ScopeCatalog,
+  project: ProjectRecord | undefined,
+  location: ScopeLocation & { markerPath: string },
+): ResolvedScope {
+  const { workspaceRoot, markerPath, git } = location;
   const knownScopes = Object.values(catalog.scopes)
     .map((record) =>
       scopeReference(
@@ -220,11 +202,55 @@ export async function resolveScope(
   };
 }
 
-export async function listRegisteredProjects(
-  dataDir = DEFAULT_CONFIG.dataDir,
-): Promise<ProjectRecord[]> {
-  const catalog = await loadScopeCatalog(dataDir);
-  return Object.values(catalog.projects).sort((a, b) =>
-    a.name.localeCompare(b.name),
+export async function resolveScope(
+  cwd: string,
+  options: ResolveScopeOptions = {},
+): Promise<ResolvedScope | null> {
+  const markerName = options.markerName ?? DEFAULT_MARKER_NAME;
+  const dataDir = options.dataDir ?? DEFAULT_CONFIG.dataDir;
+  const home = resolve(options.homeDir ?? homedir());
+  const git = resolveGitContext(cwd);
+  const workspaceRoot = resolve(git?.mainRoot ?? options.startCwd ?? cwd);
+  if (isFilesystemRoot(workspaceRoot))
+    throw new ScopeBoundaryError(workspaceRoot);
+
+  // Loading also migrates legacy global Scope registrations before their old
+  // marker can be interpreted as an active memory Scope.
+  await loadScopeCatalog(dataDir);
+
+  let markerPath = join(workspaceRoot, markerName);
+  if (!(await markerExists(markerPath))) {
+    markerPath =
+      (await restoreScopeMarker(
+        dataDir,
+        workspaceRoot,
+        git?.repositoryId,
+        home,
+        markerName,
+      )) ?? markerPath;
+  }
+  if (!(await markerExists(markerPath))) return null;
+
+  const marker = await readScopeMarker(markerPath);
+  const resolved = await resolveCatalogRecord(dataDir, marker);
+  const { catalog, project } = resolved;
+  const location = { cwd, workspaceRoot, git };
+  const scope = await matchRepositoryIdentity(
+    resolved.scope,
+    dataDir,
+    location,
   );
+  if (!scope) return null;
+  catalog.scopes[scope.scopeId] = scope;
+  const updated = await updateScopeLocation(
+    dataDir,
+    scope.scopeId,
+    markerPath,
+    workspaceRoot,
+    home,
+  );
+  return resolvedScopeView(updated, catalog, project, {
+    ...location,
+    markerPath,
+  });
 }

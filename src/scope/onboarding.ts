@@ -5,8 +5,6 @@ import { resolveGitContext } from "./git.js";
 import {
   createProject,
   createScope,
-  disableProjectMemory,
-  findMemoryDisabledProject,
   loadScopeCatalog,
   readScopeMarker,
   rebindScopeRepositoryId,
@@ -18,13 +16,6 @@ import {
 import { resolveScope, type ResolvedScope } from "./resolver.js";
 
 const CREATE_PROJECT = "새 Project 만들기";
-const WITHOUT_MEMORY = "이 Project에서 메모리 사용 안 함";
-
-type ProjectChoice =
-  | { kind: "project"; project: ProjectRecord }
-  | { kind: "memory-disabled" }
-  | null;
-
 function suggestedName(root: string): string {
   return basename(resolve(root)) || "scope";
 }
@@ -155,7 +146,7 @@ async function chooseProject(
   ctx: ExtensionContext,
   config: OrchestratorConfig,
   root: string,
-): Promise<ProjectChoice> {
+): Promise<ProjectRecord | null> {
   const catalog = await loadScopeCatalog(config.dataDir);
   const projects = Object.values(catalog.projects).sort((a, b) =>
     a.name.localeCompare(b.name),
@@ -163,24 +154,16 @@ async function chooseProject(
   const choice = await ctx.ui.select("이 위치의 메모리 Project를 선택하세요", [
     ...projects.map((project) => project.name),
     CREATE_PROJECT,
-    WITHOUT_MEMORY,
   ]);
   if (!choice) return null;
-  if (choice === WITHOUT_MEMORY) return { kind: "memory-disabled" };
   if (choice !== CREATE_PROJECT) {
     const selected = projects.find((project) => project.name === choice);
-    if (selected) return { kind: "project", project: selected };
+    if (selected) return selected;
   }
   const proposed = suggestedName(root);
   const input = await ctx.ui.input("새 Project 이름", proposed);
   if (input === undefined) return null;
-  return {
-    kind: "project",
-    project: await createProject(
-      config.dataDir,
-      input.trim() || proposed,
-    ),
-  };
+  return createProject(config.dataDir, input.trim() || proposed);
 }
 
 export async function onboardScope(
@@ -196,38 +179,11 @@ export async function onboardScope(
 
   const git = resolveGitContext(ctx.cwd);
   const root = resolve(git?.mainRoot ?? ctx.cwd);
-  const memoryDisabled = await findMemoryDisabledProject(
-    config.dataDir,
-    root,
-    git?.repositoryId,
-  );
-  if (memoryDisabled) {
-    ctx.ui.notify(
-      `Project '${memoryDisabled.name}'는 메모리에 등록하지 않도록 설정되어 있습니다.`,
-      "info",
-    );
-    return null;
-  }
-
   const recovery = await recoverRenamedRepository(ctx, config, root);
   if (recovery.handled) return recovery.scope;
 
-  const choice = await chooseProject(ctx, config, root);
-  if (!choice) return null;
-  if (choice.kind === "memory-disabled") {
-    const disabled = await disableProjectMemory(config.dataDir, {
-      root,
-      name: suggestedName(root),
-      ...(git?.repositoryId ? { repositoryId: git.repositoryId } : {}),
-    });
-    ctx.ui.notify(
-      `Project '${disabled.name}'는 이후 세션에서도 메모리에 등록하지 않습니다.`,
-      "info",
-    );
-    return null;
-  }
-
-  const { project } = choice;
+  const project = await chooseProject(ctx, config, root);
+  if (!project) return null;
   while (true) {
     const scopeName = await chooseScopeName(ctx, config, project, root);
     if (!scopeName) {

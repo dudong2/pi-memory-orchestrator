@@ -1,13 +1,7 @@
 import { basename, join } from "node:path";
-import {
-  cp,
-  mkdir,
-  readFile,
-  rename,
-  rm,
-  stat,
-  writeFile,
-} from "node:fs/promises";
+import { createOperationWaiter } from "./lib/hindsight.js";
+import { pathExists as exists } from "./lib/files.js";
+import { cp, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { loadConfig, resolveHindsightConnection } from "../src/config.js";
 import { HindsightClient } from "../src/hindsight/client.js";
 import { resolveAgentRoot } from "../src/hermes.js";
@@ -38,16 +32,6 @@ function argument(name: string): string {
   return value;
 }
 
-async function exists(path: string): Promise<boolean> {
-  try {
-    await stat(path);
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
-    throw error;
-  }
-}
-
 const apply = process.argv.includes("--apply");
 const sourceScopeId = argument("--source");
 const targetScopeId = argument("--target");
@@ -64,6 +48,9 @@ const encodedBank = encodeURIComponent(bankId);
 const client = new HindsightClient({
   ...connection,
   requestTimeoutMs: 180_000,
+});
+const waitForOperation = createOperationWaiter(client, bankId, {
+  includeError: true,
 });
 const catalog = await loadScopeCatalog(config.dataDir);
 const source = catalog.scopes[sourceScopeId];
@@ -109,22 +96,6 @@ async function list(
   return jsonRequest(
     `/v1/default/banks/${encodedBank}/${path}?${query.toString()}`,
   );
-}
-
-async function waitForOperation(operationId: string, timeoutMs = 900_000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const operation = await client.operationStatus(bankId, operationId);
-    const status = operation.status.toLowerCase();
-    if (status === "completed") return operation;
-    if (status === "failed" || status === "cancelled") {
-      throw new Error(
-        `operation ${operationId} ${status}: ${JSON.stringify(operation.error)}`,
-      );
-    }
-    await new Promise((resolve) => setTimeout(resolve, 500));
-  }
-  throw new Error(`operation ${operationId} timed out`);
 }
 
 async function blockingOperationCount(): Promise<number> {

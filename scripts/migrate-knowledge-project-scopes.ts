@@ -1,9 +1,8 @@
-import { dirname } from "node:path";
 import { loadConfig, resolveHindsightConnection } from "../src/config.js";
 import { HindsightClient } from "../src/hindsight/client.js";
 import { ensureKnowledgeViews } from "../src/hindsight/knowledge.js";
 import { loadScopeCatalog } from "../src/scope/catalog.js";
-import { resolveScope } from "../src/scope/resolver.js";
+import { resolveRegisteredScope } from "./lib/scope.js";
 
 const apply = process.argv.includes("--apply");
 const config = loadConfig();
@@ -30,14 +29,7 @@ if (!apply) process.exit(0);
 let createdFolders = 0;
 let createdPages = 0;
 for (const record of Object.values(catalog.scopes)) {
-  const root = dirname(record.markerPath);
-  const scope = await resolveScope(root, {
-    dataDir: config.dataDir,
-    markerName: config.markerName,
-    startCwd: root,
-  });
-  if (!scope)
-    throw new Error(`registered scope did not resolve: ${record.scopeId}`);
+  const scope = await resolveRegisteredScope(record, config);
   const result = await ensureKnowledgeViews(client, bankId, scope);
   createdFolders += result.createdFolders;
   createdPages += result.createdPages;
